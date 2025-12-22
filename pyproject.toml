@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codenames-rl"
+version = "0.1.0"
+description = "Codenames RL environment and training for LLM agents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Environment
+    "gymnasium>=0.29.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    # Embeddings baseline
+    "sentence-transformers>=3.0.0",
+    # LLM inference & training
+    "torch>=2.0.0",
+    "transformers>=4.46.0",
+    "accelerate>=1.0.0",
+    "peft>=0.13.0",
+    "bitsandbytes>=0.44.0",
+    "trl>=0.12.0",
+    "datasets>=3.0.0",
+    # Data storage
+    "pandas>=2.0.0",
+    "pyarrow>=17.0.0",
+    # App
+    "streamlit>=1.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "deepeval>=0.21.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+    "pre-commit>=3.6.0",
+    "hypothesis>=6.100.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "I", "W"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
