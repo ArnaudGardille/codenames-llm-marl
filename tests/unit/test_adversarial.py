@@ -187,11 +187,3 @@ class TestCodenamesAdversarialGym:
             steps += 1
         
         assert steps < max_steps  # Should terminate
-
-
-@pytest.fixture
-def temp_vocabulary(temp_vocabulary):
-    """Reuse the existing temp_vocabulary fixture from test_baselines."""
-    return temp_vocabulary
-
-

@@ -29,7 +29,13 @@ if TYPE_CHECKING:
 
 try:
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+    from transformers import (
+        AutoModelForCausalLM, 
+        AutoTokenizer, 
+        PreTrainedTokenizerFast,
+        set_seed
+    )
+    from huggingface_hub import hf_hub_download
     HAS_TORCH = True
     # Try to import bitsandbytes for quantization
     try:
@@ -40,6 +46,62 @@ try:
 except ImportError:
     HAS_TORCH = False
     HAS_BITSANDBYTES = False
+
+
+def _load_tokenizer_with_fallback(model_name: str, trust_remote_code: bool = True):
+    """Load tokenizer with fallback for models with custom tokenizer backends.
+    
+    Some models (like Ministral) use custom tokenizer backends (e.g., TokenizersBackend)
+    that aren't recognized by transformers' AutoTokenizer. This function first tries
+    the standard AutoTokenizer, and if that fails, falls back to loading the tokenizer
+    directly using PreTrainedTokenizerFast.
+    
+    Args:
+        model_name: The model name or path
+        trust_remote_code: Whether to trust remote code (for custom tokenizers)
+        
+    Returns:
+        A tokenizer instance
+        
+    Raises:
+        ValueError: If the tokenizer cannot be loaded with either method
+    """
+    try:
+        # Try standard AutoTokenizer first
+        return AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    except ValueError as e:
+        if "does not exist or is not currently imported" in str(e):
+            # Fallback for custom tokenizer backends
+            try:
+                tokenizer_file = hf_hub_download(model_name, 'tokenizer.json')
+                tokenizer_config_file = hf_hub_download(model_name, 'tokenizer_config.json')
+                
+                # Load config to get special tokens
+                with open(tokenizer_config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Create tokenizer from the json file
+                tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file)
+                
+                # Set special tokens from config
+                tokenizer.pad_token = config.get('pad_token')
+                tokenizer.eos_token = config.get('eos_token', '</s>')
+                tokenizer.bos_token = config.get('bos_token', '<s>')
+                tokenizer.unk_token = config.get('unk_token', '<unk>')
+                
+                # Set model max length
+                if 'model_max_length' in config:
+                    tokenizer.model_max_length = config['model_max_length']
+                
+                return tokenizer
+            except Exception as fallback_error:
+                raise ValueError(
+                    f"Failed to load tokenizer for {model_name}. "
+                    f"AutoTokenizer error: {e}. "
+                    f"Fallback error: {fallback_error}"
+                )
+        else:
+            raise
 
 
 class BaseSpymaster(ABC):
@@ -892,7 +954,7 @@ class LLMSpymaster(BaseSpymaster):
             set_seed(seed)
         
         # Load model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = _load_tokenizer_with_fallback(self.model_name)
         
         # Setup quantization if requested
         quantization_config = None
@@ -961,6 +1023,7 @@ class LLMSpymaster(BaseSpymaster):
         # Load model with appropriate configuration
         model_kwargs = {
             "device_map": self.device if quantization_config is None else "auto",
+            "trust_remote_code": True,  # Required for some newer models like Ministral
         }
         if quantization_config is not None:
             model_kwargs["quantization_config"] = quantization_config
@@ -1295,7 +1358,7 @@ class LLMGuesser(BaseGuesser):
             self.model = model
             self.tokenizer = tokenizer
         else:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.tokenizer = _load_tokenizer_with_fallback(self.model_name)
             
             # Setup quantization if requested
             quantization_config = None
@@ -1363,6 +1426,7 @@ class LLMGuesser(BaseGuesser):
             # Load model with appropriate configuration
             model_kwargs = {
                 "device_map": self.device if quantization_config is None else "auto",
+                "trust_remote_code": True,  # Required for some newer models like Ministral
             }
             if quantization_config is not None:
                 model_kwargs["quantization_config"] = quantization_config
