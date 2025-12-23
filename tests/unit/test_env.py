@@ -2,7 +2,6 @@
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 from codenames_rl.env import (
     CodenamesEnv,
@@ -13,12 +12,6 @@ from codenames_rl.env import (
     is_valid_clue,
     load_wordlist,
 )
-
-
-@pytest.fixture
-def wordlist_path():
-    """Path to test wordlist."""
-    return str(Path(__file__).parent.parent.parent / "configs" / "wordlist.txt")
 
 
 @pytest.fixture

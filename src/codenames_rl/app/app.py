@@ -4,6 +4,7 @@ import streamlit as st
 from pathlib import Path
 
 from codenames_rl.env import CodenamesEnv, SpymasterAction, GuesserAction, GamePhase, CardColor
+from codenames_rl.utils.config import get_language_paths
 
 # Page config
 st.set_page_config(page_title="Codenames", page_icon="🎯", layout="centered")
@@ -49,13 +50,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize environment
-WORDLIST_PATH = Path(__file__).parent.parent.parent.parent / "configs" / "wordlist.txt"
-
-
-def init_game(seed: int = None):
-    """Initialize a new game."""
-    env = CodenamesEnv(str(WORDLIST_PATH))
+def init_game(wordlist_path: str, seed: int = None):
+    """Initialize a new game.
+    
+    Args:
+        wordlist_path: Path to wordlist file
+        seed: Random seed for game generation
+    """
+    env = CodenamesEnv(str(wordlist_path))
     obs, _ = env.reset(seed=seed)
     return env, obs
 
@@ -74,7 +76,9 @@ def get_card_class(color: CardColor, revealed: bool) -> str:
 
 # Session state initialization
 if "env" not in st.session_state:
-    st.session_state.env, st.session_state.obs = init_game()
+    st.session_state.language = "en"
+    wordlist_path, _ = get_language_paths(st.session_state.language)
+    st.session_state.env, st.session_state.obs = init_game(wordlist_path)
     st.session_state.show_colors = False
     st.session_state.history = []
 
@@ -85,18 +89,30 @@ obs = st.session_state.obs
 st.markdown("# 🎯 Codenames")
 
 # Controls row
-col1, col2, col3 = st.columns([1, 1, 1])
+col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     if st.button("🔄 New Game", use_container_width=True):
-        st.session_state.env, st.session_state.obs = init_game()
+        wordlist_path, _ = get_language_paths(st.session_state.language)
+        st.session_state.env, st.session_state.obs = init_game(wordlist_path)
         st.session_state.history = []
         st.rerun()
 with col2:
     st.session_state.show_colors = st.toggle("👁 Spymaster View", st.session_state.show_colors)
 with col3:
+    language_options = ["en", "fr"]
+    current_index = 0 if st.session_state.language == "en" else 1
+    new_language = st.selectbox("Language", language_options, index=current_index)
+    if new_language != st.session_state.language:
+        st.session_state.language = new_language
+        wordlist_path, _ = get_language_paths(st.session_state.language)
+        st.session_state.env, st.session_state.obs = init_game(wordlist_path)
+        st.session_state.history = []
+        st.rerun()
+with col4:
     seed = st.number_input("Seed", value=None, step=1, placeholder="Random")
     if st.button("Set Seed", use_container_width=True):
-        st.session_state.env, st.session_state.obs = init_game(seed=int(seed) if seed else None)
+        wordlist_path, _ = get_language_paths(st.session_state.language)
+        st.session_state.env, st.session_state.obs = init_game(wordlist_path, seed=int(seed) if seed else None)
         st.session_state.history = []
         st.rerun()
 
@@ -179,4 +195,5 @@ with st.sidebar:
     st.markdown("### 📜 History")
     for item in reversed(st.session_state.history[-10:]):
         st.markdown(f"- {item}")
+
 

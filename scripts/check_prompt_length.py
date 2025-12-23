@@ -199,3 +199,4 @@ print(f"Spymaster prompt: {spymaster_length:,} tokens ({spymaster_length/model_m
 print(f"Guesser prompt: {guesser_length:,} tokens ({guesser_length/model_max_length*100:.2f}%)")
 print(f"\n✅ Both prompts fit comfortably within the context window!")
 
+

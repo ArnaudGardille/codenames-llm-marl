@@ -1,8 +1,5 @@
 """Integration tests for Qwen embedding agents with evaluation scripts."""
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from codenames_rl.agents import (
@@ -17,48 +14,6 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-
-
-@pytest.fixture
-def temp_vocabulary():
-    """Create a temporary vocabulary file for testing."""
-    vocab_words = [
-        "apple", "banana", "cherry", "dog", "elephant",
-        "forest", "guitar", "house", "island", "jungle",
-        "kitchen", "laptop", "mountain", "notebook", "ocean",
-        "piano", "queen", "river", "sunset", "tree",
-        "umbrella", "violin", "water", "xylophone", "yellow",
-        "zebra", "animal", "fruit", "music", "nature"
-    ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-        f.write('\n'.join(vocab_words))
-        temp_path = f.name
-    
-    yield temp_path
-    
-    Path(temp_path).unlink(missing_ok=True)
-
-
-@pytest.fixture
-def temp_wordlist():
-    """Create a temporary wordlist file for testing."""
-    wordlist_words = [
-        "car", "book", "phone", "chair", "lamp",
-        "desk", "window", "door", "wall", "floor",
-        "ceiling", "table", "pen", "paper", "ink",
-        "light", "dark", "sun", "moon", "star",
-        "cloud", "rain", "snow", "wind", "storm",
-        "fire", "water", "earth", "air", "metal"
-    ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-        f.write('\n'.join(wordlist_words))
-        temp_path = f.name
-    
-    yield temp_path
-    
-    Path(temp_path).unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch and transformers not available")
@@ -230,4 +185,5 @@ class TestQwenIntegration:
             assert metrics2.num_games == 2
         except Exception as e:
             pytest.skip(f"Qwen model not available: {e}")
+
 

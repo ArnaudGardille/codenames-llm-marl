@@ -81,6 +81,8 @@ The Spymaster sees the hidden board labels and must give clues to help the Guess
 
 **Expected performance**: Win rate ~10-20%, avg score 5-7 cards
 
+**Note on Cross-Encoders**: Cross-Encoders (rerankers) provide superior accuracy by computing similarity scores directly from text pairs, but are slower than Bi-Encoders. For the Spymaster use case (scoring ~100 candidates × ~25 board words = ~2,500 pairs), pure Cross-Encoder would be prohibitively slow (~10-30s per clue). A hybrid **Retrieve & Re-Rank** approach (Bi-Encoder for retrieval, Cross-Encoder for re-ranking top-k) could improve accuracy while maintaining reasonable speed. See `CrossEncoderSpymaster` and `CrossEncoderGuesser` for implementations.
+
 ---
 
 #### 3. **ClusterSpymaster**
@@ -112,7 +114,37 @@ The Spymaster sees the hidden board labels and must give clues to help the Guess
 
 ---
 
-#### 4. **LLMSpymaster**
+#### 4. **CrossEncoderSpymaster**
+
+**Strategy**: Use hybrid **Retrieve & Re-Rank** approach: Bi-Encoder for fast retrieval, Cross-Encoder for accurate re-ranking.
+
+**Key improvement over EmbeddingsSpymaster**:
+- Cross-Encoders compute similarity scores directly from text pairs (more accurate)
+- Better at understanding nuanced relationships between clues and words
+- Hybrid approach balances speed and accuracy
+
+**How it works**:
+1. **Step 1 (Retrieval)**: Use Bi-Encoder to score ~100 candidate clues against board words (fast)
+2. **Step 2 (Re-ranking)**: Use Cross-Encoder to re-rank top-20 candidates against all board words (accurate)
+3. Apply same penalty system as EmbeddingsSpymaster (assassin, opponent, neutral penalties)
+4. Count = number of team words above relative threshold in Cross-Encoder scores
+
+**Strengths**:
+- More accurate semantic matching than pure Bi-Encoder
+- Better at understanding context-dependent relationships
+- Maintains reasonable speed (~2-5s per clue) via hybrid approach
+- Same safety mechanisms as EmbeddingsSpymaster
+
+**Weaknesses**:
+- Slower than pure Bi-Encoder (~2-5s vs ~1s per clue)
+- Requires loading two models (Bi-Encoder + Cross-Encoder)
+- Still limited compared to full LLM reasoning
+
+**Expected performance**: Win rate ~15-25%, avg score 6-8 cards, assassin rate <5%
+
+---
+
+#### 5. **LLMSpymaster**
 
 **Strategy**: Use a large language model (Qwen2.5-7B-Instruct) with zero-shot prompting to generate contextually aware clues.
 
@@ -261,6 +293,8 @@ The Guesser sees only the board words (not labels) and must identify team words 
 
 **Expected performance**: Helps team find ~5-7 cards
 
+**Note on Cross-Encoders**: For the Guesser use case (1 clue × ~20 words = ~20 pairs), Cross-Encoders are more feasible (~1-2s per guess) and could provide better accuracy. A hybrid approach (Bi-Encoder retrieval + Cross-Encoder re-ranking) is implemented in `CrossEncoderGuesser`.
+
 ---
 
 #### 5. **ContextualGuesser**
@@ -377,6 +411,35 @@ Which word should you guess? Respond with JSON: {"guess": "word"} or {"guess": "
 - Slow (~10-30s per guess on CPU, ~2-5s on GPU)
 - No explicit memory of previous clues (though sees revealed words)
 - Can guess invalid words (not on board, already revealed) - caught by validation
+
+**Expected performance**: Helps team find ~6-8 cards
+
+---
+
+#### 8. **CrossEncoderGuesser**
+
+**Strategy**: Use hybrid **Retrieve & Re-Rank** approach: Bi-Encoder for fast retrieval, Cross-Encoder for accurate re-ranking.
+
+**Key improvement over EmbeddingsGuesser**:
+- Cross-Encoders provide superior accuracy for semantic matching
+- Better at understanding nuanced relationships between clues and words
+- Hybrid approach maintains reasonable speed (~1-2s per guess)
+
+**How it works**:
+1. **Step 1 (Retrieval)**: Use Bi-Encoder to score clue against all unrevealed words (fast)
+2. **Step 2 (Re-ranking)**: Use Cross-Encoder to re-rank top-10 candidates (accurate)
+3. Guess if best Cross-Encoder score exceeds relative threshold, otherwise pass
+
+**Strengths**:
+- More accurate than pure Bi-Encoder
+- Better semantic understanding of clue-word relationships
+- Reasonable speed (~1-2s per guess)
+- Conservative threshold prevents risky guesses
+
+**Weaknesses**:
+- Slower than pure Bi-Encoder (~1-2s vs ~0.1s per guess)
+- Requires loading two models (Bi-Encoder + Cross-Encoder)
+- Still single-clue matching (no history like ContextualGuesser)
 
 **Expected performance**: Helps team find ~6-8 cards
 

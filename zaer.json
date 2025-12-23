@@ -1,0 +1,403 @@
+[
+    {
+      "model": "gpt-5",
+      "input": [
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Tu es un assistant spécialisé dans la pré-analyse de recevabilité de dossiers de médiation MOBILIANS.\n\nTu réponds en français, de manière claire, structurée et strictement factuelle.\nTu travailles pour aider les gestionnaires de médiation (Olivia / Pascale) avant transmission à la médiatrice.\n\nTu as accès :\n- aux données structurées du formulaire (MySQL) fournies dans le prompt utilisateur,\n- aux pièces jointes.\n\nOBJECTIF \nProduire une analyse métier structurée (texte), utile et auditable :\n1) Résumer la situation.\n2) Identifier et qualifier les pièces jointes (type estimé + rôle).\n3) Évaluer la recevabilité : statut global (recevable / irrecevable / a_completer) + justification.\n4) Analyser séparément :\n   - Lettre de réclamation (existence matérielle puis cohérence/rattachement)\n   - Facture (présence + caractère obligatoire + cohérence pro)\n   - Coordonnées professionnel\n   - Dates (saisine, réclamation, intervention) + délais\n   - Cohérences/incohérences (identités, adresses, professionnel)\n5) Lister les points à compléter + recommandations concrètes.\n\nPRINCIPES NON NÉGOCIABLES\n- Tu n’inventes jamais d’information.\n- Si une information n’est pas trouvée, tu le dis explicitement.\n- Tu distingues toujours : « trouvé », « absent », « incertain ».\n  - « absent » = aucune pièce ne contient l’élément.\n  - « incertain » = pièce potentiellement pertinente mais ambiguë ou non rattachable avec certitude.\n- Tu privilégies l’analyse directe des pièces jointes comme preuve, avant le formulaire.\n- Les relances/demandes du médiateur ne prouvent jamais à elles seules l’absence d’un document.\n- En cas de contradiction, tu l’indiques et tu conclus avec prudence.\n\nCONTRAINTE CRITIQUE (anti-erreur “lettre absente”)\n- Tu dois analyser le contenu des pièces jointes avant d’utiliser les relances du médiateur.\n- Toute pièce initialement « autre » ou « email » doit être testée contre la définition métier de la lettre de réclamation.\n- Tu ne peux conclure « lettre absente » que si aucune pièce ne contient un écrit décrivant un litige ET une demande adressée au professionnel.\n\nDÉFINITION MÉTIER – LETTRE DE RÉCLAMATION (à appliquer à toutes les pièces candidates)\nUne lettre de réclamation est considérée comme valide au sens MOBILIANS si un document permet d’identifier :\n- un problème imputé au professionnel,\n- une demande adressée au professionnel (réparation, remboursement, mise en demeure, prise en charge),\n- le professionnel concerné,\nmême si le document n’est pas intitulé “lettre de réclamation” et même si la forme est atypique.\n\nMots-clés recommandés (adapter au dossier) :\n- Lettre/réclamation : “réclamation”, “mise en demeure”, “je vous demande”, “prise en charge”, “réparation”, “remboursement”, “courrier”, “LRAR”, “recommandé”\n- AR / envoi : “accusé de réception”, “AR”, “recommandé”, “LR”, “preuve d’envoi”, “La Poste”, “suivi”\n- Réponse pro : “réponse”, “suite à votre courrier”, “nous avons bien reçu”, “garage”, “atelier”\n- Identité : nom/prénom, adresse, email, “Monsieur”, “Madame”\n- Dates : “le ”, “date :”, “fait à”, “Meudon le”, “le [jour] [mois] [année]”\n- Véhicule : immatriculation, modèle, VIN (si utile)\n\nSORTIE ATTENDUE (format texte)\nUtilise exactement ces sections :\nA) Résumé de la situation\nB) Inventaire et qualification des pièces (liste)\nC) Preuves et constats par critère (lettre / AR / facture / dates / identités / professionnel)\nD) Contradictions et points d’alerte (si applicable)\nE) Statut global proposé + justification\nF) Points à compléter (liste d’actions)\nG) Recommandations (qui fait quoi : consommateur / médiateur)\nH) Sources (liste [document] + extrait court)\n\nCITATIONS\nPour chaque conclusion importante, tu fournis une citation : [document] + un extrait court.\nNe cite pas de longs passages."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Voici le dossier à traiter.\nIl est complété par les pièces jointes.\n\n- Exposé du litige (formulaire) :\nAchat du véhicule Volkswagen Cadxy California le 28/08 (véhicule de démonstration) à la concession  Jean-Lain Chambéry.\nDans la liste des des options il est noté : préparation poir seconde batterie.\nJean-Lain est incapable de m'installer cette seconde batterie car Volkswagen est dans l'incapacité de fournir les données techniques pour faire le travail.\nSans cette batterie secondaire, impossible d'utiliser mon véhicule pour lequel je l'avais acheté (branchement d'équipements véhicule VASP)\nAutre souci : lors de ma première utilisation du véhicule sur autoroute, gros bruit dans l'habitacle (se se produit qu'à partir de 110 km/h.\nSouci reproduit par les services techniques Jean-Lain.\nVéhicule déjà au garage ...\n\n- Attente (formulaire) :\nRestituer le véhicule \n\n- Demandeur (formulaire) :\nPrénom : Frédéric \nNom : Cassin \nAdresse : 9 rue du Baronnet , 74000, Annecy \n\n- Professionnel (formulaire) :\nPrénom : Gilles\nNom : ARGOUD\nRaison sociale : Jean-Lain Chambéry VUL\nAdresse : 158 rue des Épinettes , 73290, La MOTTE SERVOLEX \n\n- Liste des fichiers uploadés :\n- 66612_9127_1_25990002007_Demande_conso_1_20251028.pdf\n- 66630_9127_1_Exemple reponse societé externe.docx\n- 66631_9127_1_Réponse Volkswagen.docx\n- 66632_9127_1_mail réclamation.docx\n- 66633_9127_1_Option préparation pour seconde batterie.JPG\n- 66634_9127_1_courriercaddy Frederic cassin.pdf\n- 66635_9127_1_Contrat de vente.pdf\n- 66636_9127_1_mail réclamation.pdf\n- 66637_9127_1_Réponse Volkswagen.pdf\n- 66638_9127_1_Exemple reponse societé externe.pdf\n- 66646_9127_1_25990002007_Recevabilité_conso_20251029.pdf\n- 66647_9127_2_25990002007_Information_Pro_20251029.pdf\n- 66951_9127_1_Suivi de réclamation.pdf\n- 68863_9127_2_25990002007_Information_Pro_Relance_20251121.pdf\n- 69209_9127_1_25990002007_Refus-Pro_20251125.pdf\n\n- Documents :\n<FILE name=\"66612_9127_1_25990002007_demande_conso_1_20251028.pdf\">\nMonsieur Cassin Frédéric  \n9 rue du Baronnet  \n74000 Annecy  \nFrance  \nyoda.snow@gmail.com  \nMeudon, le 28 octobre 2025  \n\nOBJET : Demande de saisine du médiateur incomplète  \nRef : 25990002007 / Cassin Frédéric  \n(à rappeler dans toute correspondance)  \n\nMadame, Monsieur,  \n\nVous avez saisi le Médiateur de Mobilians, inscrit sur la liste des médiateurs de la consommation établie par les pouvoirs publics, d’une demande de médiation dans le cadre d’un litige avec la société Jean-Lain Chambéry VUL.  \n\nAfin de pouvoir en confirmer la recevabilité, je vous serais reconnaissante de bien vouloir me transmettre à minima votre réclamation écrite au professionnel concerné datant de moins d’un an (email, sms ou courrier recommandé avec avis de réception), comme l’exige l’article L. 612-2 du Code de la consommation :  \n- soit en les déposant directement dans votre espace sur le site mediateur-mobilians.fr ;  \n- soit par courriel, à l’adresse mediateur@mediateur-mobilians.fr (merci de rappeler le numéro de dossier qui vous a été attribué) ;  \n- soit par courrier à l’adresse suivante : Mme le Médiateur de Mobilians - 43 bis route de Vaugirard - CS 80016 - 92197 MEUDON Cedex (merci de rappeler le numéro de dossier qui vous a été attribué dans votre correspondance).  \n\nAttention : dans le cas où vous n’auriez pas de contact écrit datant de moins d’un an, votre demande ne pourra pas être considérée comme recevable (art. L. 612-2 du Code de la consommation). Si vous êtes dans cette situation, je vous invite à adresser sans tarder une réclamation écrite au professionnel. Sans réponse dans un délai raisonnable, ou sans réponse satisfaisante, vous pourrez alors compléter votre demande de médiation, en y joignant la copie dudit courrier.  \n\nJe vous remercie de m’adresser ces éléments – ainsi que, autant que faire se peut, le descriptif et une estimation chiffrée de votre demande, accompagnés de tout justificatif – d’ici le 31 octobre 2025.  \n\nJe vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.  \n\nNathalie CANAL  \nMédiateur de Mobilians  \n\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\n</FILE>\n\n<FILE name=\"66634_9127_1_courriercaddy frederic cassin.pdf\">\nJean Lain Automobiles \nSAS Jean Lain Automobiles Seynod \nau capital 1 200 000 € \n268 route des Creuses \nZI des Césardes - Seynod \n74600 Annecy \nTéléphone 04 50 10 06 26 \nwww.jeanlain.com \nRCS Annecy 425 125 895 \nSIRET 425 125 895 0010 \nCode APE 4511 Z \nN°TVA Intracom FR66 425 125 895 \nN°ORIAS 07028878\nSite de Seynod\n \nCASSIN Frederic \n9 Rue du baronnet \n74 000 Annecy\n \nSeynod, le 10/10/2025 \nPose d’une batterie de type auxiliaire \nNuméro de série du véhicule concerné : WV2ZZZSK2RX025861\nImmatriculation : GT-313-HX\nMise en circulation : 28/12/2023\nKilométrage : 22 007 \nMadame, Monsieur \nEn ma qualité de Responsable Après-vente Utilitaires pour le groupe Jean Lain \nautomobiles sur le site de Volkswagen Seynod, \nJ’atteste par la présente que le constructeur indique que la pose d’un équipement \naprès montage usine de type batterie auxiliaire sur votre véhicule immatriculé \nGT-313-HX, doit être réalisé par un carrossier (équipementier) et ne peut être \nréalisé en concession Volkswagen. \nCes informations proviennent d’une demandé réalisée auprès du service pièces de Volkswagen \nGroup France et de la note que vous nous avez fourni et qui semble provenir du constructeur \nen Allemagne. \nNous sommes navrés à notre échelle de ne pas pouvoir équiper votre véhicule de cet élément \nqui comme vous me l’avez dit semble essentiel dans votre utilisation de celui-ci. \nJe reste naturellement à votre écoute, \nSincères salutations, \n \nErwan MISSILLIER\n</FILE>\n\n<FILE name=\"66635_9127_1_contrat de vente.pdf\">\nJEAN LAIN ENTREPR'SES  \nVéhicules Utilitaires  \nZ.A.C. des Landiers Ouest  \nB.P. 617  \n73006 CHAMBERY Cedex  \nTel : 04 79 68 33 40  \nFax 04 79 68 33 80  \nwww.jeanlain.com  \nS.A.S. au capital de 240 000 €  \nR.C.S. Chambéry B 451 376149  \nSiret : 451 376 149 00022 - Code APE 4511 Z  \nN\" T.V.A. lntracom. FR 20 451 376149  \n1'18359  \n5111 )  \nVéhicste§  \n&  \nUiilitâ;r*s  \n(o  \nLe 2810812025 page  \nMonsieur CASSIN FREDERIC  \n9 RUE DU BARONNET  \n74OOO ANNECY  \nEmail frederic.cassin@wanadoo.fr  \nFacture Véhicule ,  \nRèglement le 2810812025  \nBureau:  \nPortable: 0630893280  \n888107  \nDomicile.:  \nI Télécopie:  \nCode llllontant H-T. Taux Montant itl/À  \n0 314,76 0,00 0,00  \n1 0,00 0,00 0,00  \n2 30 321,03 20,00 6 064,21  \n0,00 0,00 0,00  \n4 0,00 0,00 0,00  \nCode Mohtant.H,T, Tâux Montant TVA  \n0,00 0,00 0,00  \n^  \n0,00 0,00 0,00  \n7 0,00 0,00 0,00  \nI 0,00 0,00 0,00  \nI 0,00 0,00 0,00 à,.Pâyer= - ,,=,. 36 700,00  \nTout retard de règlement de la part d'un professionnel donnera lieu, outre les pénalités de retard, au pâiement d,une indémnité forfaitâire de recouvrement de 40 euros ..  \nSiren :  \nMaroue Tvoe Châssis Mise en circulation Moteur lmmatriculation Date d'entrée I Kms  \nVUL SBBT55 VIIY2ZZZSK2RXO2SB6I 28t12t2023 DTR925318 GT313HX 20 162  \nVéhicule de Démonstration moderc *;l*ta*,;ü,ri  \nI .r 658.34 | 2  \nI ,ro,r.l 2  \nI ozo,es I 2  \n] zez.so I 2  \nti  \nI ,o025,ool 2  \n| .o'',oo I o  \nI so,oo ] 2  \nI 165,831 2  \nI rr,ool o  \nI z,zal o  \ntlI -11 207,301 2  \nPfix de vente  \nOptions FENETRES LATERALES AV EN VERRE ATHERMIQUE, FENETRE  \nPEINTURE METALLISEE REFLET DARGENT  \nPROJECTEURS A LED AVEC ECLAIMGE DE JOUR A LED  \nATTELAGE RDSO  \nMONTANT CARTE GRISE  \nCARBURANT  \nDEMARCHES ADMINISTRATIVES ET LOGISTIQUE  \nTAXE DE GESTION SIV  \nTAXE D'ACHEMINEMENT SIV  \nAccessorTes  \nAvances client  \nParti ci pati on Excepti on n el I e  \nËA VU IJAI<,AN I I §ËLO'V LES CONDITIONS DU COIVSTRUCTEUR  \nJUSQU'AU 27/12/2025. VENDTJ AVEC 20 162 KMS Assurance pneu incluse - Réf. zrs2o66o6wBTNB- BR/DGEST)NE Toos 2os6o16 g6w (\"r\")'\"'ou*::,i:',:;W::\"'::,u;\"\";,:;Ë:,îTi:?:\";,rè,;;;,*;'-;\"-  \n1005a26A2A)sAR)R  \nTotal H.L 30 635,79  \n.Ï..Vl§,.: 6 064,21  \nI,,!ltaL {,Cgte§}r 36 7oo,oo  \n<  \n\\nrv r-nlru vw vuL cHAMBÉRy - sas JEAN LAIN ENTREeRISEs  \n' ZAC des Landiers Ouest 158 Rue des Epinettes 73000 - Chambéry  \n: Siret 45137614900022 R.C.S,  \n: Lieu du siège sociaI ZAC DES LANDIERS OUEST tS8 RUE DES EptNETTES 73OoO -  \n, cHnMeÉny  \nTét 04 79 68 33 40  \nFax 04 79 68 33 80  \nEmaiI relationctient@jeanlain.com  \nVendeur DAVID LEMAY  \nTél 0479602633  \nTétmobite O664O2L559  \nEmaiI dtemay@jeanlain.com  \nVéhicules  \nUtititaires  \nT,9r ryr,m ffi æ w, w mfr,m effi ffi w,,æ i,*^fus,.&,aun$ tï:: r;i# \",t:;,l r;: ». t om fl «s rc  \nAnnule et remptace la commandê #274047  \nFait te 08/08/2025 à 1,2:37  \nN\" 27hOhA I 5111  \nNom  \nAdresse  \nCode postal  \nL ocalité  \nMarque  \nModèle  \nVersion  \nFinition  \nÉne rq ie  \nC hâ ssis  \nlmmatriculation  \nDâte MEC*  \nKm  \nCV fiscaux / DIN  \nNb. de portes  \nCarrosserie  \nCouleur ext.  \nTra nsmission  \nM. Frederic CASSIN  \n9 Rue du Baronnet  \n74000  \nAn ne cy  \nVi.1i.\\^:iü 14 t:1.:1.] i-j ; it i i /n illl,t  \nl\" k lllly a ;t L. l'i: i-n :t ? a f\\  \nt).sçç,; {.:*1.i1*tw;: ';.} 1ü1lt}.1 t:!1ti j  \nDiese I  \n0.0 l/100km  \n139 g/km  \nWV2ZZZS K2RX025861  \nGT-313-HX  \n28112/2023 1,u\"\" en circutatian)  \n0ui  \n20165 km  \n1tI22  \nCombiné  \n5  \nTtü,ï;,]11 liltLlir:!\\.11. lü1j1. it,)'jlit t i::i1  \nÿ.ti *1.1 Ll' hlt {:î1.1i' Il{:.1 !:.i..t\".i':;1.:; i '-t;;ii  \nAutomate sequentiel  \nConstructeur / Complète /jusqu'au 21172/2025  \nl'Mise en.ncuhtian)  \nTé1. mobile  \nTé1. bureau  \nTé1. privé  \nAdresse mail  \nProfession  \nC o- titula ire  \n0630893280  \nf rederic.cassin@wanadoo,f r  \n[',larque  \nt lodèle  \nVersion  \nFinition  \nÉnergie  \nConsommation mixte  \nÉmission de C02  \nC hâssis  \nlmmatriculation  \nDate MEC'  \nPremière main  \nKm (nôn garânti)  \nCV fiscaux / DIN  \nCarrosserie  \nNb. de portes  \nCouleur int.  \nCouleur ext.  \nTransmission  \nGarantie übelté / type / duÈe)  \nO Contrat de garantie  \nPRIX DU VÉHICULE  \nOptions du véhicule  \nRemises  \nAccessoires  \nSOUS-TOTAL  \nPaCk livraisôn /Êo.,/rorf)  \nCotbutant lô0,A0 € ffC) / Démarches odmtnistratives el  \nlogisttq0e (199,AA € TTC)  \nCertif icat d'immatriculation Dpt 74 la.or  \nde tinbre )1.AA €, achenimenent 2 7ô €)  \nFrais divers  \nTaxe CO2  \nïaxe paraf iscale  \nTOTAL H.T  \nTVA*  \nPrix ïTC (€)  \n46 390,01  \n1 955,00  \n-73 448,11  \ni 230,00  \n36 726,24  \n2 5 9,00  \n314,16  \n0,00  \n0,00  \n0,00  \n30 635,79  \n6 064,2L  \n0,00 €  \n36 700,00 €  \n3 000,00 €  \nVALEUR NETTE DE  \nLA REPRISE  \nSOLDE A REGLER  \nT.T,C  \nACOMPTE VERSÉ À  \nLA COMMANDE  \nDate extrême de livraison :28109/2A25  \nEn cas de refus de prcndte livraisan ovanttrois mois o camptet de la s)gnoture du ban de  \ncamnonde, le pix mentionné .i-conte êst sùs.eptibte de ÿaiotions loticte 3 des  \nrcndilians génércles de vente).  \nVoi Anicie Xll des Cônditians Génércles de Vente.  \nLe véhicule commandé au titre de ce bon de commande f ait l,obJet d,un f inancement  \ng Comptant  \nRèglement du solde  \nlvloyen de paiement de l'acompte  \nt Chèque  \nrenseigîés ddns ce dacument. Pour tautes éclamatians, le client peut s'adresser à 1'établÈsement vendeur, dant les coodannées fiourcnt.i,dessLs.  \nDZ  \nI  \nAN LAIN VW VUL CHAMBÉRY - SAS JEAN LAIN ENTREPRISES  \nÀC des Landiers Ouest 158 Rue des Epinettes 73000 - Chambéry  \niiret 45137614900022 R.C.S.  \nLieu du siège sociaI ZAC DES LANDIERS OUEST 158 RUE DES EPINETTES 73000 -  \nCHAM BÉRY  \nTét 04 79 68 33 40  \nFax 04 79 68 33 80  \nEmaiI relationclient@jeanlain.com  \nffh * * -& -\"\" * * \".,*. \"-....*. ^ *;Ë *  \nAnnule et remptace [à commânde #274047  \nFait Le 08/08/2025 à L2:37  \nVéhicules  \nVendeur DAVID LEMAY Utilitaires  \nTét 0479é02633  \nTét mobite 0664021559  \nEmaiI d lemay@jeanlain.com  \nçfrf;s{ç.::{ \"'Fÿ ' \"ffi#f }#? No 274048 I 5111  \nCod e  \nQC1  \n8 E8E  \n8tY  \nL ibellé  \nFenêtres latérales AV en verre athermique, fenêtres latérales AR et lunette AR assombries, absorbant la  \nlumière à 74%  \nPeinture métallisée Ref let d'Arqent  \nProject eurs à L ED avec éclairage de jour à L ED  \nPrix TTC (€)  \n2 65,00  \n745,00  \n945,00  \nTOTAL 1 955,00  \nL ibellé  \nRemise commerciale Véhicule Démonstration  \nMontant TTC (€)  \n13 448,11  \nCode L ibellé  \nATIELAGE RDSO  \nPrix total TT C (€)  \n1 230,00  \nTOTAL 1 230,00  \nÿ/  \nYC  \n.AN LAIN VW VUL CHAMBERY - SAS JEAN LAIN ENTREPRISES  \n-AC des Landiers Ouest 158 Rue des Epinettes 73000 - Chambéry  \nSiret 45137614900022 R.C.S.  \nLieu du siège sociaI ZAC DES LANDIERS OUEST 158 RUE DES EPINETTES 73000 -  \nCHAM BÉRY  \nTét 04 79 68 33 40  \nFax 04 79 68 33 80  \nEma it relationclient@jeantain.co m  \nVendeur DAVID LEMAY  \nTét 0479602633  \nTé[ mobite 0664021559  \nEmait dtemay@jeanlain,com  \nYéhicutes  \nUtititaires  \nWi,q;affi ffiw r,:tr*'#ffirwffi.ffiw8ffiffi wæ&ll;u';'x.vs#,\"r.* t#*wt;;:,i:il,ri*tAtïmlrü  \nAnnule et remptace la commande #274047  \nFait le 08/08/2025 à 12:31  \nNo 2740h8 I 5111  \nOBSERVATIONS  \nLOI MONTAGNE: Votre conseiller commercial se tient à votre disposition pour vous proposer la solution la plus adaptée pour rouler en toute sécurité  \nconf ormément à la loi.  \nTVA et toutes taxes relatives à l'immatriculation et la mise en circulation du véhicule en vigueur le jour de la livraison  \nAvantage bonus écologique et prime à la conversion / conditions : Le véhicule doit avoir parcouru plus de 6000 km et être conservé plus d'un an avant d'être  \ncédé. De même, si le contrat de location est ramené à moins de deux ans après sa signature, l'aide accordée, majorée ou non, sera réclamée par l'agence de  \nservice des paiements dans les 3 mois suivants la cession.  \nDepuis le 1er janvier 2023 (pour les particuliers), il n'est possible de bénéficier du bonus écologique qu'une fois tous les 3 ans par catéqôrie de véhicule  \nélect rique.  \nEn t attendant la loi de finance de 2025 concernant le malus écologique, le rnontant indiqué est une provision du montant qui pourra être ajusté au moment  \nde la livraison.  \nModalités de règlement :  \n- Virement bancaire uniquement.  \n- Chèque inférieur à 3000€ dans le cadre d'un acompte  \nsoLDE À nÉclen 33 7oo,oo € T.T.c  \nË;\" . opporu a ,\".\" voir des affres ûnnerciates rclailves aù prcduis et servtes commercialtsés por l'étoblissement vendeut.  \nEIF I  \ni irl;t4  \n158 rue  \nZl des L  \nr ei. u+  \nRC5  \nFait en deu\\ ercmplaies  \n1et exenploîe : client  \n2ème exemplaie : disÿibuteur  \nCachet du disributeur  \n\",@,F*Erytmæp p fl +i ffi &5Y § ù',qtuè AùUleÿtu  \nDàte et siqnat!re du client  \nfaire précéder de \"lu et approuvé'  \n.ltatteste ovoï pris connoissonce du coroctèrc tdcultotildes  \nIo\"\"'1\"''\"'' fiff;;;; _  \nDL  \nfc  \n: .::..:.:. :_.. ilil;i :,rril\n</FILE>\n\n<FILE name=\"66636_9127_1_mail réclamation.pdf\">\nFrédéric Cassin\n9, rue du Baronnet\n74000 - Annecy\nTél: 06 30 89 32 80\nCourriel : yoda.snow@gmail.com\n\nJean-Lain\n158 rue des Épinettes\n73290 - LA MOTTE SERVOLEX\n\nÀ Annecy, le 7 octobre 2025\n\nMadame, Monsieur,\n\nJe me réfère à l'acquisition de mon véhicule Volkswagen Caddy, immatriculé GT-313-HX, effectuée au sein de votre concession Jean Lain le 28 août 2025.\n\nCe véhicule a été spécifiquement acheté avec l'option « Préparation pour seconde batterie », un équipement essentiel à l'usage auquel je destine ce Caddy.\n\nOr, je constate avec regret que cette option, pourtant facturée et garantie contractuellement, s'avère non fonctionnelle.\n\nMalgré mes démarches répétées, il m'a été signifié par vos services techniques que l'installation de la batterie auxiliaire est impossible en l'état. Vos équipes ont en effet indiqué être dans l'incapacité de procéder à cette installation, faute de disposer des informations et des ressources nécessaires de la part du constructeur Volkswagen.\n\nDe surcroît, mes tentatives de résolution directe auprès de Volkswagen France n'ont abouti à aucune solution concrète ou plan de réparation. Le véhicule ne répond donc pas aux spécifications contractuelles prévues au moment de la vente.\n\nCette situation constitue un manquement grave à vos obligations contractuelles, assimilable à un défaut de conformité et à un vice caché, en vertu des dispositions légales suivantes :\n\n- Article 1604 du Code civil : Le vendeur est tenu de délivrer une chose conforme aux stipulations du contrat.\n\n- Article 1641 du Code civil : Le vendeur est tenu de la garantie à raison des défauts cachés de la chose rendue qui la rendent impropre à l'usage auquel on la destine.\n\n- Article L217-4 du Code de la consommation : Le vendeur est tenu de livrer un bien conforme au contrat et répond des défauts de conformité existant lors de la délivrance.\n\nÉtant donné l'échec des tentatives de réparation et la non-conformité avérée d'une fonctionnalité essentielle, je vous mets par la présente en demeure de procéder à l'annulation de la vente et au remboursement intégral du prix d'achat, contre restitution du véhicule.\n\nJe vous prie de bien vouloir prendre contact avec moi dans les plus brefs délais, et au plus tard sous huit jours, afin d'organiser les modalités de cette restitution. À défaut de réponse satisfaisante de votre part dans ce délai, je me verrai contraint d'engager les procédures judiciaires appropriées pour préserver mes droits.\n\nDans l'attente d'une résolution diligente de ce litige, je vous prie d'agréer, Madame, Monsieur, l'expression de ma considération distinguée.\n\nFrédéric Cassin\n</FILE>\n\n<FILE name=\"66637_9127_1_réponse volkswagen.pdf\">\nBonjour Monsieur CASSIN,  \nComme convenu, nous revenons vers vous suite à notre entretien téléphonique de ce jour, au sujet de votre Volkswagen Véhicules Utilitaires Caddy.  \n\nDans votre correspondance, vous nous faites part de votre demande d'installation d'une batterie secondaire sur votre véhicule.  \n\nNous tenons à vous informer que nous avons fait le point en interne, qui nous ont indiqué qu'il n'existe aucun kit de post montage de batterie secondaire en accessoires d'origine.  \n\nNous entendons tout à fait votre sentiment, qui fait suite aux incidents décrits dans votre correspondance. La qualité de nos véhicules reste une priorité absolue et cela nous permet de garantir une relation de confiance avec l’ensemble de nos clients.  \n\nVotre correspondance illustre votre expérience et nous vous en remercions car, il nous permet d’améliorer notre qualité de service. Veuillez croire que le nécessaire est fait par nos équipes, pour prévenir ces situations.  \n\nVotre satisfaction est notre priorité, vous recevrez prochainement notre enquête vous invitant à évaluer la prestation de notre Service Clients valable 10 jours.  \n\nVotre Service Clients se tient à votre écoute, vous remercie pour votre confiance et vous prie de recevoir, Monsieur CASSIN, nos salutations distinguées.  \n\nNous remercions d'avoir pris le temps de nous lire et restons à votre disposition si besoin.  \n\nValentine  \nVotre Conseillère Clientèle Volkswagen Véhicules Utilitaires.  \n\nAfin d’assurer un traitement efficace et rapide de votre demande, je vous remercie d’utiliser la fonction « répondre », depuis ce mail. Votre réponse sera ainsi bien identifiée et routée vers le bon interlocuteur.  \n\nNous vous informons qu'en application des dispositions de l’article L616-1 du Code de la consommation, vous avez la possibilité de faire appel au médiateur CMFM aux coordonnées suivantes : Médiation Cmfm, 93/95 Avenue du Général Leclerc 75014 PARIS - www.mediationcmfm.fr\n</FILE>\n\n<FILE name=\"66638_9127_1_exemple reponse societé externe.pdf\">\nvan society (van-society@outtlook.com>\nA mot\nBonjour,\nAprès avoir anatysé la faisabiiité de i''instattation soi:haiiée, nous ne préférons pas\nprocéder à cette instatlation.\nLe risque de soi;cis technlques pai'[a suite est apparemment éi.evé.\nNous sommes navrés de ne pouvoir répondre à votre demande.\nEn vous remerciant.\nBonne journée.\ntun. I\nôôn+ JVl/r.\n09:58\nCordialement\nI tA \n^t \nô/ltatrf\\/ Vt)l\\-ô\\)i-rltr I I\nA,nthonyCHRET|N\na9æ434241\nva n - s o c i ety@ o utlo o k. c o m\n\nvan society <van-society@outlook.com> lun. 8 sept. 09:58\n\nÀ moi\n\nBonjour,\n\nAprès avoir analysé la faisabilité de l'installation souhaitée, nous ne préférons pas procéder à cette installation.\n\nLe risque de soucis techniques par la suite est apparemment élevé.\n\nNous sommes navrés de ne pouvoir répondre à votre demande.\n\nEn vous remerciant.\n\nBonne journée.\n\nCordialement\n\nVAN-SOCIETY\n\nAnthony CHRETIN\n\n0953430241\n\nvan-society@outlook.com\n</FILE>\n\n<FILE name=\"66646_9127_1_25990002007_recevabilité_conso_20251029.pdf\">\nMonsieur Cassin Frédéric  \n9 rue du Baronnet  \n74000 Annecy  \nFrance  \nyoda.snow@gmail.com  \nMeudon, le 29 octobre 2025  \n\nOBJET : Votre demande de médiation auprès du Médiateur de Mobilians  \nRef : 25990002007 / Cassin Frédéric  \n(à rappeler dans toute correspondance)  \n\nMadame, Monsieur,  \n\nVous avez saisi le Médiateur de Mobilians, inscrit sur la liste des médiateurs de la consommation établie par les pouvoirs publics, d’une demande de médiation en date du 10 octobre 2025.  \n\nAprès vérification, je vous informe que cette demande est recevable au sens de l’article L. 612-2 du Code de la consommation.  \n\nConformément à l’article R 612-1 du Code de la consommation, vous avez la faculté, à votre charge, de vous faire représenter par un avocat ou de vous faire assister par toute personne de votre choix à tous les stades de la médiation.  \n\nVous pouvez également solliciter l’avis d’un expert dont les frais sont à votre charge. En cas de demande conjointe d’expertise avec le professionnel les frais sont partagés entre les parties.  \n\nJe contacte ce jour le professionnel afin qu’il me confirme son accord pour entrer en médiation. Les professionnels comme les consommateurs ont en effet un intérêt convergent à ce que les litiges soient réglés à l’amiable en dehors de toute action judiciaire.  \n\nIl dispose d'un délai de 15 jours pour me faire part de sa décision.  \n\nSi le professionnel accepte d’entrer en médiation, vous recevrez la notification de ma saisine effective.  \n\nSi le professionnel refuse d’entrer en médiation ou si, à l’issue du délai imparti pour répondre, je n'ai pas de retour de sa part, je serai au regret de devoir procéder à la clôture de votre demande de médiation.  \n\nJe vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.  \n\nNathalie CANAL  \nMédiateur de Mobilians  \nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\n</FILE>\n\n<FILE name=\"66647_9127_2_25990002007_information_pro_20251029.pdf\">\nMonsieur ARGOUD Gilles  \nJean-Lain Chambéry VUL  \n158 rue des Épinettes  \n73290 La MOTTE SERVOLEX  \nMeudon, le 29 octobre 2025  \nOBJET : Saisine du Médiateur de Mobilians  \nRef : 25990002007 (à rappeler dans toute correspondance) / Commande non conforme au contrat  \n\nMadame, Monsieur,  \nEn tant que Médiateur de Mobilians inscrit sur la liste des médiateurs de la consommation établie par les pouvoirs publics, je vous informe avoir été saisie par Monsieur Cassin Frédéric d’une demande de médiation concernant un litige avec votre société.  \nAprès vérification, cette demande est recevable en médiation de la consommation au sens de l’article L. 612-2 du Code de la consommation et peut faire l’objet d’une tentative de médiation.  \nLes professionnels comme les consommateurs ont un intérêt convergent à ce que les litiges soient réglés à l’amiable en dehors de toute action judiciaire.  \nAussi, je vous encourage à retourner le coupon réponse d’acceptation d’entrer en médiation ci-joint :  \npar courrier à :  \nMme le Médiateur de Mobilians  \n43 bis Route de Vaugirard - CS 80016  \n92197 MEUDON Cedex  \nou par courriel à : mediateur@mediateur-mobilians.fr  \nen rappelant la référence citée en objet, avant le 13 novembre 2025.  \nIl convient de me transmettre les coordonnées de la personne habilitée à suivre le processus de médiation au sein de l’entreprise, à savoir : nom et prénom, adresse courriel, numéro de ligne directe et/ou de mobile.  \nLa médiation, dont vous pouvez vous retirer à tout moment, se déroulera ensuite selon les modalités exposées ci-après en annexe. Le coût d’une médiation est de 50€ HT (60€ TTC) par dossier de médiation accepté. Le règlement vous sera demandé à la clôture du processus de médiation.  \nSi vous ne souhaitez pas participer à la médiation, ce que je regrette vivement, je vous remercie de m’en faire part également, en renvoyant le coupon réponse complété en conséquence, par courrier ou courriel.  \nSi vous souhaitez des informations complémentaires sur le déroulement du processus de médiation, je vous invite à me contacter.  \nSans nouvelles de votre part d’ici la date susmentionnée, je serai dans l’obligation de considérer que vous refusez la médiation et j’en informerai Monsieur Cassin Frédéric en conséquence.  \nJe vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.  \n\nNathalie CANAL  \nMédiateur de Mobilians  \n\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr  \n\nANNEXE – Descriptif du processus  \nLa mission du Médiateur de Mobilians est décrite sur son site internet :  \nhttp://www.mediateur-mobilians.fr/ et dans la Charte de la médiation (https://www.mediateurmobilians.fr/userfiles/files/Charte mediateur Mobilians modifiee_12072024.pdf).  \n\nDans les relations entre professionnels et consommateurs, dès lors qu’existe une volonté commune de rechercher une solution à un différend qui se ferait jour, les modes alternatifs de règlement des litiges, dont la médiation, permettent d’instaurer ou de rétablir un dialogue entre les parties. Ils sont, de surcroît, plus rapides, plus accessibles, plus souples et moins coûteux qu’une procédure judiciaire. Une référence possible à l’équité, modalité propre aux règlements alternatifs des litiges, contribue à la souplesse du dispositif.  \nConformément aux exigences légales (art. L. 612-1 du Code de la consommation), la médiation est gratuite pour le consommateur. Une participation financière est en revanche demandée au professionnel qui s’engage dans une médiation sous l’égide du Médiateur de Mobilians, selon les modalités décrites sur le site susmentionné.  \nLe coût d’une médiation est de 50€ HT (60€ TTC) par dossier de médiation. Le règlement sera demandé à la clôture du processus de médiation, quelle qu’en soit l’issue.  \n\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr  \n\nMonsieur ARGOUD Gilles  \nJean-Lain Chambéry VUL  \n158 rue des Épinettes  \n73290 La MOTTE SERVOLEX  \n\nOBJET : Saisine du Médiateur de Mobilians  \nRef : 25990002007 (à rappeler dans toute correspondance) / Commande non conforme au contrat  \n\nRÉPONSE À UNE DEMANDE DE MÉDIATION D’UN CONSOMMATEUR  \n\n☐ Monsieur ARGOUD Gilles, accepte la demande de médiation de la consommation citée en objet au nom de Jean-Lain Chambéry VUL  \nEt inscrit à cette fin son numéro adhérent : ....................................................................  \nLa personne habilitée à suivre le processus de médiation au sein de l’entreprise est :  \nNom et prénom :....................................................................................................  \nAdresse courriel : .................................. @ ............................................................  \nNuméro de tél. ligne directe et / ou mobile : ..............................................................  \nMonsieur ARGOUD Gilles reconnaît avoir été informé que le coût de la médiation pour Jean-Lain Chambéry VUL est de 50€ HT, soit 60 € TTC, que Jean-Lain Chambéry VUL s’engage à régler par chèque, à l’ordre de MOBILIANS (en inscrivant la référence citée en objet au dos du chèque) lors de la clôture de la médiation, quelle qu’en soit son issue, qui sera notifiée par le médiateur.  \n\n☐ Monsieur ARGOUD Gilles, refuse la demande de médiation  \nPour la raison suivante : ..............................................................................................  \n☐ Vous avez d’ores et déjà trouvé ensemble une solution amiable ..................................  \n☐ Autre raison (précisez) : ......................................................................................  \n(cette raison, sauf accord contraire, demeurera confidentielle).  \n\nFait à .........................................., le ..............................................  \nSignature engageant la société Jean-Lain Chambéry VUL  \n\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\n</FILE>\n\n<FILE name=\"66951_9127_1_suivi de réclamation.pdf\">\nFrédéric C. <yoda.snow@gmail.com>  \nSuivi de réclamation : Non-conformité persistante (Option Batterie) et Nouveau défaut (Bruit habitacle) - Volkswagen Caddy GT-313-HX  \n1 message  \nFrédéric C. <yoda.snow@gmail.com>  \nÀ : relationclient@jeanlain.com  \nCc : LEMAY David <dlemay@jeanlain.com>  \nFrédéric Cassin  \n9, rue du Baronnet  \n74000 - Annecy  \nTél : 06 30 89 32 80  \nCourriel : yoda.snow@gmail.com  \n1 novembre 2025 à 08:39  \n\nJean-Lain  \n158 rue des Épinettes  \n73290 - LA MOTTE SERVOLEX  \n\nÀ Annecy, le 1 Novembre 2025  \n\nMadame, Monsieur,  \n\nJe fais suite à mon courrier de mise en demeure du 7 octobre 2025 concernant le défaut de non-conformité de l'option « Préparation pour seconde batterie » de mon véhicule Volkswagen Caddy, immatriculé GT-313-HX, acquis le 28 août 2025.  \n\n1. Non-conformité de l'option « Préparation pour seconde batterie »  \nJe prends acte de votre proposition de me diriger vers une entreprise tierce, susceptible d'être en mesure d'installer cette batterie secondaire ainsi qu'un chauffage stationnaire.  \nNéanmoins, je me dois de réitérer mon constat : vos services ne sont pas en mesure d'honorer l'option contractuelle « Préparation pour seconde batterie ». Le fait de devoir recourir à un prestataire externe pour rendre fonctionnel un équipement commandé et facturé dès l'achat ne saurait être considéré comme une résolution satisfaisante de votre manquement contractuel initial.  \n\n2. Surcharges et mobilisation du véhicule  \nÀ ce problème initial, vient s'ajouter la nécessité d'une troisième intervention dans les locaux de Jean Lain Seynod, motivée cette fois par un bruit persistant et insupportable au sein de l'habitacle du véhicule (constaté par les techniciens Jean Lain).  \nCette troisième intervention s'annonce plus conséquente et nécessitera l'immobilisation du Caddy pendant plusieurs jours.  \n\nConclusion  \nL'accumulation de ces défauts, moins de deux mois après l'acquisition de ce véhicule, entraîne une perte de temps considérable en recherches de solutions, démarches administratives et énergie dépensée de ma part.  \nJ'ai investi une somme importante dans un véhicule qui cumule les non-conformités et les défauts majeurs.  \nDans l'attente des propositions concrètes du constructeur Volkswagen concernant la résolution de ces problèmes, je vous prie d'ores et déjà de considérer la dégradation de mon expérience utilisateur et les désagréments financiers et logistiques induits par cette situation.  \n\nJe vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées,  \n\nFrédéric Cassin  \n06 30 89 32 80\n</FILE>\n\n<FILE name=\"68863_9127_2_25990002007_information_pro_relance_20251121.pdf\">\nMonsieur ARGOUD Gilles\nJean-Lain Chambéry VUL\n158 rue des Épinettes\n73290 La MOTTE SERVOLEX\nMeudon, le 21 novembre 2025\nOBJET : Relance concernant la saisine du Médiateur de Mobilians\nRef : 25990002007 (à rappeler dans toute correspondance) / Commande non conforme au contrat\nMadame, Monsieur, \nEn tant que Médiateur de Mobilians inscrit sur la liste des médiateurs de la consommation établie par les\npouvoirs publics, je vous informe avoir été saisie par Monsieur Cassin Frédéric d’une demande de médiation\nconcernant un litige avec votre société.\nAprès vérification, cette demande est recevable en médiation de la consommation au sens de l’article L.\n612-2 du Code de la consommation et peut faire l’objet d’une tentative de médiation. \nLes professionnels comme les consommateurs ont un intérêt convergent à ce que les litiges soient\nréglés à l’amiable en dehors de toute action judiciaire.\nJe vous ai adressé un courrier/courriel en ce sens le 29 octobre 2025 vous demandant si vous acceptez\nd’entrer en médiation.\nSans nouvelles de votre part, je me permets de vous relancer, car faute de réponse de votre part d’ici\nle 13 novembre 2025, je serai contrainte de considérer que vous refusez d’entrer en médiation et adresserai un\nmessage au consommateur en ce sens. \nSi vous souhaitez des informations complémentaires sur le déroulement du processus de médiation, je\nvous invite à me contacter.\nJe vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.\nNathalie CANAL\nMédiateur de Mobilians\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\nANNEXE – Descriptif du processus\nLa mission du Médiateur de Mobilians est décrite sur son site internet :\nhttp://www.mediateur-mobilians.fr/ et dans la Charte de la médiation (https://www.mediateur￾mobilians.fr/userfiles/files/Charte mediateur Mobilians modifiee_12072024.pdf). \nDans les relations entre professionnels et consommateurs, dès lors qu’existe une volonté\ncommune de rechercher une solution à un différend qui se ferait jour, les modes alternatifs de\nrèglement des litiges, dont la médiation, permettent d’instaurer ou de rétablir un dialogue entre les\nparties. Ils sont, de surcroît, plus rapides, plus accessibles, plus souples et moins coûteux qu’une\nprocédure judiciaire. Une référence possible à l’équité, modalité propre aux règlements alternatifs\ndes litiges, contribue à la souplesse du dispositif. \nConformément aux exigences légales (art. L. 612-1 du Code de la consommation), la\nmédiation est gratuite pour le consommateur. Une participation financière est en revanche\ndemandée au professionnel qui s’engage dans une médiation sous l’égide du Médiateur de\nMobilians, selon les modalités décrites sur le site susmentionné.\nLe coût d’une médiation est de 50€ HT (60€ TTC) par dossier de médiation. Le règlement\nsera demandé à la clôture du processus de médiation, quelle qu’en soit l’issue. \nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\nMonsieur ARGOUD Gilles\nJean-Lain Chambéry VUL\n158 rue des Épinettes\n73290 La MOTTE SERVOLEX\nOBJET : Saisine du Médiateur de Mobilians\nRef : 25990002007 (à rappeler dans toute correspondance) / Commande non conforme au contrat\nRÉPONSE À UNE DEMANDE DE MÉDIATION D’UN CONSOMMATEUR\nMonsieur ARGOUD Gilles, accepte la demande de médiation de la consommation citée en\nobjet au nom de Jean-Lain Chambéry VUL\nEt inscrit à cette fin son numéro adhérent : ....................................................................\nLa personne habilitée à suivre le processus de médiation au sein de l’entreprise est :\nNom et prénom :....................................................................................................\nAdresse courriel : .................................. @ ............................................................\nNuméro de tél. ligne directe et / ou mobile : ..............................................................\nMonsieur ARGOUD Gilles reconnaît avoir été informé que le coût de la médiation pour\nJean-Lain Chambéry VUL est de 50€ HT, soit 60 € TTC, que Jean-Lain Chambéry VUL\ns’engage à régler par chèque, à l’ordre de MOBILIANS (en inscrivant la référence citée en\nobjet au dos du chèque) lors de la clôture de la médiation, quelle qu’en soit son issue, qui\nsera notifiée par le médiateur.\nMonsieur ARGOUD Gilles, refuse la demande de médiation\nPour la raison suivante : ..............................................................................................\n Vous avez d’ores et déjà trouvé ensemble une solution amiable ..................................\n Autre raison (précisez) : .......................................................................................\n(cette raison, sauf accord contraire, demeurera confidentielle).\nFait à .........................................., le ..............................................\nSignature engageant la société Jean-Lain Chambéry VUL\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\n</FILE>\n\n<FILE name=\"69209_9127_1_25990002007_refus-pro_20251125.pdf\">\nMonsieur Cassin Frédéric\n9 rue du Baronnet\n74000 Annecy\nFrance\nyoda.snow@gmail.com\nMeudon, le 25 novembre 2025\nOBJET : Votre demande auprès du Médiateur de Mobilians\nRef : 25990002007 (à rappeler dans toute correspondance)\nMadame, Monsieur, \nVous avez saisi le Médiateur de Mobilians, inscrit sur la liste des médiateurs de la\nconsommation établie par les pouvoirs publics, d’une demande de médiation dans le cadre d’un\nlitige avec la société Jean-Lain Chambéry VUL.\nJe suis au regret de vous informer que la société Jean-Lain Chambéry VUL refuse \ntacitement de participer à une médiation car elle n’a pas fait part de son acceptation dans le délai \nimparti.\nIl n’est en conséquence pas possible de poursuivre le processus de médiation que vous\navez demandée. \nLe présent courrier doit donc être considéré comme la notification de la clôture de la \nmédiation enregistrée sous le 25990002007.\nJe vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.\nNathalie CANAL\nMédiateur de Mobilians\nMÉDIATEUR DE MOBILIANS - 43 BIS ROUTE DE VAUGIRARD - CS 80016 - 92197 MEUDON CEDEX - www.mediateur-mobilians.fr\n</FILE>\n\n<FILE name=\"\">\n| | **van society <van-society@outlook.com>** | | lun. 8 sept. 09:58 |  |  |\n| | À moi\n\n![img-0.jpeg](img-0.jpeg) | |\n\nBonjour,\n\nAprès avoir analysé la faisabilité de l'installation souhaitée, nous ne préférons pas procéder à cette installation.\n\nLe risque de soucis techniques par la suite est apparemment élevé.\n\nNous sommes navrés de ne pouvoir répondre à votre demande.\n\nEn vous remerciant.\n\nBonne journée.\n\n*Cordialement*\n\n*VAN-SOCIETY*\n\n*Anthony CHRETIN*\n\n*0953430241*\n\n*van-society@outlook.com*\n\n---\n\nBonjour Monsieur CASSIN,\n\nComme convenu, nous revenons vers vous suite à notre entretien téléphonique de ce jour, au sujet de votre Volkswagen Véhicules Utilitaires Caddy.\n\nDans votre correspondance, vous nous faites part de votre demande d'installation d'une batterie secondaire sur votre véhicule.\n\nNous tenons à vous informer que nous avons fait le point en interne, qui nous ont indiqué qu'il n'existe aucun kit de post montage de batterie secondaire en accessoires d'origine.\n\nNous entendons tout à fait votre sentiment, qui fait suite aux incidents décrits dans votre correspondance. La qualité de nos véhicules reste une priorité absolue et cela nous permet de garantir une relation de confiance avec l’ensemble de nos clients.\n\nVotre correspondance illustre votre expérience et nous vous en remercions car, il nous permet d’améliorer notre qualité de service. Veuillez croire que le nécessaire est fait par nos équipes, pour prévenir ces situations.\n\nVotre satisfaction est notre priorité, vous recevrez prochainement notre enquête vous invitant à évaluer la prestation de notre Service Clients **valable 10 jours.**\n\nVotre Service Clients se tient à votre écoute, vous remercie pour votre confiance et vous prie de recevoir, Monsieur CASSIN, nos salutations distinguées.\n\nNous remercions d'avoir pris le temps de nous lire et restons à votre disposition si besoin.\n\nValentine\n\nVotre Conseillère Clientèle Volkswagen Véhicules Utilitaires.\n\n**Afin d’assurer un traitement efficace et rapide de votre demande, je vous remercie d’utiliser la fonction « répondre », depuis ce mail. Votre réponse sera ainsi bien identifiée et routée vers le bon interlocuteur.**\n\n*Nous vous informons qu’en application des dispositions de l’article L616-1 du Code de la consommation, vous avez la possibilité de faire appel au médiateur CMFM aux coordonnées suivantes : Médiation Cmfm, 93/95 Avenue du Général Leclerc 75014 PARIS -* *www.mediationcmfm.fr*\n\n---\n\n**Frédéric Cassin**\n\n9, rue du Baronnet\n\n74000 - Annecy\n\nTél : 06 30 89 32 80\n\nCourriel : yoda.snow@gmail.com\n\nJean-Lain\n\n158 rue des Épinettes\n\n73290 - LA MOTTE SERVOLEX\n\n​**À Annecy, le 7 octobre 2025**\n\n​**Madame, Monsieur,**\n\n​Je me réfère à l'acquisition de mon véhicule **Volkswagen Caddy**, immatriculé **GT-313-HX**, effectuée au sein de votre concession Jean Lain le **28 août 2025**.\n\n​Ce véhicule a été spécifiquement acheté avec l'option « **Préparation pour seconde batterie** », un équipement essentiel à l'usage auquel je destine ce Caddy.\n\n​Or, je constate avec regret que cette option, pourtant facturée et garantie contractuellement, s'avère **non fonctionnelle**.\n\n​Malgré mes démarches répétées, il m'a été signifié par vos services techniques que l'installation de la batterie auxiliaire est **impossible** en l'état. Vos équipes ont en effet indiqué être dans l'incapacité de procéder à cette installation, faute de disposer des informations et des ressources nécessaires de la part du constructeur Volkswagen.\n\n​De surcroît, mes tentatives de résolution directe auprès de **Volkswagen France** n'ont abouti à aucune solution concrète ou plan de réparation. Le véhicule ne répond donc pas aux spécifications contractuelles prévues au moment de la vente.\n\n​Cette situation constitue un **manquement grave à vos obligations contractuelles**, assimilable à un défaut de conformité et à un vice caché, en vertu des dispositions légales suivantes :\n\n- ​**Article 1604 du Code civil :** Le vendeur est tenu de délivrer une chose conforme aux stipulations du contrat.\n- ​**Article 1641 du Code civil :** Le vendeur est tenu de la garantie à raison des défauts cachés de la chose vendue qui la rendent impropre à l'usage auquel on la destine.\n- ​**Article L217-4 du Code de la consommation :** Le vendeur est tenu de livrer un bien conforme au contrat et répond des défauts de conformité existant lors de la délivrance.\n\n​Étant donné l'échec des tentatives de réparation et la non-conformité avérée d'une fonctionnalité essentielle, je vous mets par la présente **en demeure** de procéder à l'**annulation de la vente** et au **remboursement intégral** du prix d'achat, contre restitution du véhicule.\n\n​Je vous prie de bien vouloir prendre contact avec moi dans les plus brefs délais, et au plus tard sous **huit jours**, afin d'organiser les modalités de cette restitution. À défaut de réponse satisfaisante de votre part dans ce délai, je me verrai contraint d'engager les procédures judiciaires appropriées pour préserver mes droits.\n\n​Dans l'attente d'une résolution diligente de ce litige, je vous prie d'agréer, Madame, Monsieur, l'expression de ma considération distinguée.\n\n​**Frédéric Cassin**\n</FILE>\n\n<FILE name=\"66633_9127_1_option préparation pour seconde batterie.jpg\">\ncompris outillage de bord et cric\n\nFenêtres lat. AV en verre athermique, fenêtres lat. AR et lunette arrière assombries, absorbant la lumière à 74%\n\nRéglage en hauteur des deux sièges avant manuel\n\nAménagements spéciaux par \"Customized Solution\" (site de production Poznan)\n\n2 prises 12 volts, l'une dans le compartiment de charge, l'autre dans le tableau de bord\n\nPare-chocs peints dans la teinte du véhicule\n\nTiroirs sous les sièges avant\n\nPays avec homologation de type France\n\nPlaque constr. pr. véhicule particulier M1 avec réception par type CE, indicat. de poids et certificat de conformité\n\nPréparation pour batterie secondaire\n\nPoids total autorisé en charge 2 400 kg\n</FILE>\n\n---\nRépond au format json demandé.\n"
+            }
+          ]
+        }
+      ],
+      "text": {
+        "format": {
+          "type": "json_schema",
+          "name": "recevabilite_mobilians",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resume_situation",
+              "statut_global",
+              "motif_statut_global",
+              "lettre_reclamation",
+              "facture",
+              "professionnel",
+              "dates",
+              "pieces_jointes",
+              "points_a_completer",
+              "recommandations",
+              "sources",
+              "commentaires_generaux"
+            ],
+            "properties": {
+              "resume_situation": {
+                "type": "string"
+              },
+              "statut_global": {
+                "type": "string",
+                "enum": [
+                  "recevable",
+                  "irrecevable",
+                  "a_completer"
+                ]
+              },
+              "motif_statut_global": {
+                "type": "string"
+              },
+              "lettre_reclamation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "presence",
+                  "statut",
+                  "date",
+                  "mode_envoi",
+                  "destinataire",
+                  "coordonnees_destinataire",
+                  "analyse_delai_lettre_vs_saisine",
+                  "commentaire"
+                ],
+                "properties": {
+                  "presence": {
+                    "type": "string",
+                    "enum": [
+                      "trouvee",
+                      "absente",
+                      "incertain"
+                    ]
+                  },
+                  "statut": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "manquante",
+                      "non_recevable",
+                      "a_completer"
+                    ]
+                  },
+                  "date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "mode_envoi": {
+                    "type": "string",
+                    "enum": [
+                      "lr_ar",
+                      "mail",
+                      "autre",
+                      "inconnu"
+                    ]
+                  },
+                  "destinataire": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "coordonnees_destinataire": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "analyse_delai_lettre_vs_saisine": {
+                    "type": "string",
+                    "enum": [
+                      "plus_d_un_an",
+                      "moins_d_un_mois",
+                      "delai_ok",
+                      "inconnu"
+                    ]
+                  },
+                  "commentaire": {
+                    "type": "string"
+                  }
+                }
+              },
+              "facture": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "presence",
+                  "statut",
+                  "facture_obligatoire_pour_ce_dossier",
+                  "type_professionnel",
+                  "adresse_facture",
+                  "adresse_lettre",
+                  "correspondance_professionnel",
+                  "commentaire"
+                ],
+                "properties": {
+                  "presence": {
+                    "type": "string",
+                    "enum": [
+                      "trouvee",
+                      "absente",
+                      "incertain"
+                    ]
+                  },
+                  "statut": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "manquante"
+                    ]
+                  },
+                  "facture_obligatoire_pour_ce_dossier": {
+                    "type": "boolean"
+                  },
+                  "type_professionnel": {
+                    "type": "string",
+                    "enum": [
+                      "loueur",
+                      "reparateur",
+                      "vendeur",
+                      "autre",
+                      "inconnu"
+                    ]
+                  },
+                  "adresse_facture": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "adresse_lettre": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "correspondance_professionnel": {
+                    "type": "string",
+                    "enum": [
+                      "oui",
+                      "non",
+                      "incertain"
+                    ]
+                  },
+                  "commentaire": {
+                    "type": "string"
+                  }
+                }
+              },
+              "professionnel": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "nom_ou_raison_sociale",
+                  "coordonnees",
+                  "type_professionnel",
+                  "commentaire"
+                ],
+                "properties": {
+                  "nom_ou_raison_sociale": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "coordonnees": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "type_professionnel": {
+                    "type": "string",
+                    "enum": [
+                      "loueur",
+                      "reparateur",
+                      "vendeur",
+                      "autre",
+                      "inconnu"
+                    ]
+                  },
+                  "commentaire": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "dates": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "date_intervention",
+                  "date_reclamation",
+                  "date_saisine",
+                  "analyse_delai_intervention_vs_saisine",
+                  "analyse_delai_reclamation_vs_saisine",
+                  "commentaire"
+                ],
+                "properties": {
+                  "date_intervention": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "date_reclamation": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "date_saisine": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "analyse_delai_intervention_vs_saisine": {
+                    "type": "string",
+                    "enum": [
+                      "plus_d_un_an",
+                      "moins_d_un_mois",
+                      "delai_ok",
+                      "inconnu"
+                    ]
+                  },
+                  "analyse_delai_reclamation_vs_saisine": {
+                    "type": "string",
+                    "enum": [
+                      "plus_d_un_an",
+                      "moins_d_un_mois",
+                      "delai_ok",
+                      "inconnu"
+                    ]
+                  },
+                  "commentaire": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "pieces_jointes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id_ou_nom",
+                    "type_estime",
+                    "role_dans_analyse"
+                  ],
+                  "properties": {
+                    "id_ou_nom": {
+                      "type": "string"
+                    },
+                    "type_estime": {
+                      "type": "string",
+                      "enum": [
+                        "lettre_reclamation",
+                        "facture",
+                        "formulaire",
+                        "email",
+                        "photo",
+                        "autre"
+                      ]
+                    },
+                    "role_dans_analyse": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "points_a_completer": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "recommandations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "destinataire",
+                    "type",
+                    "message"
+                  ],
+                  "properties": {
+                    "destinataire": {
+                      "type": "string",
+                      "enum": [
+                        "mediateur",
+                        "consommateur"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "demander_piece",
+                        "demander_precision",
+                        "information"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "champ",
+                    "document",
+                    "extrait"
+                  ],
+                  "properties": {
+                    "champ": {
+                      "type": "string"
+                    },
+                    "document": {
+                      "type": "string"
+                    },
+                    "extrait": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "commentaires_generaux": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]

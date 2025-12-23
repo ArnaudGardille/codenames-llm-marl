@@ -13,7 +13,14 @@ from codenames_rl.agents import (
     EmbeddingsSpymaster,
 )
 from codenames_rl.eval import compare_agents
-from codenames_rl.utils.config import WORDLIST_PATH, VOCABULARY_PATH, NUM_GAMES, AGENT_SEED, START_SEED
+from codenames_rl.utils.config import (
+    WORDLIST_PATH,
+    VOCABULARY_PATH,
+    NUM_GAMES,
+    AGENT_SEED,
+    START_SEED,
+    get_language_paths,
+)
 
 
 def main():
@@ -32,23 +39,28 @@ Examples:
   python scripts/compare_improved.py --num-games 100 --output results/comparison.json
 
   # Use French wordlists
-  python scripts/compare_improved.py \\
-      --wordlist configs/wordlist_fr.txt \\
-      --vocabulary configs/vocabulary_fr.txt
+  python scripts/compare_improved.py --lang fr
         """
     )
     
     parser.add_argument(
+        "--lang",
+        type=str,
+        choices=["en", "fr"],
+        default=None,
+        help="Language code (en/fr). Sets both wordlist and vocabulary paths."
+    )
+    parser.add_argument(
         "--wordlist",
         type=str,
-        default=WORDLIST_PATH,
-        help=f"Path to wordlist file (default: {WORDLIST_PATH})"
+        default=None,
+        help=f"Path to wordlist file (default: {WORDLIST_PATH}, or from --lang)"
     )
     parser.add_argument(
         "--vocabulary",
         type=str,
-        default=VOCABULARY_PATH,
-        help=f"Path to vocabulary file (default: {VOCABULARY_PATH})"
+        default=None,
+        help=f"Path to vocabulary file (default: {VOCABULARY_PATH}, or from --lang)"
     )
     parser.add_argument(
         "--num-games",
@@ -81,27 +93,64 @@ Examples:
     
     args = parser.parse_args()
     
-    # Define agent configurations
+    # Resolve wordlist and vocabulary paths
+    # Priority: explicit paths > --lang > defaults
+    if args.lang:
+        lang_wordlist, lang_vocabulary = get_language_paths(args.lang)
+        wordlist_path = args.wordlist if args.wordlist else lang_wordlist
+        vocabulary_path = args.vocabulary if args.vocabulary else lang_vocabulary
+    else:
+        wordlist_path = args.wordlist if args.wordlist else WORDLIST_PATH
+        vocabulary_path = args.vocabulary if args.vocabulary else VOCABULARY_PATH
+    
+    # Define agent configurations - test all combinations
     configs = {
+        # Baseline
         "Baseline (Embeddings/Embeddings)": {
             "spymaster": EmbeddingsSpymaster(
-                vocabulary_path=args.vocabulary,
+                vocabulary_path=vocabulary_path,
                 seed=args.seed,
                 top_k=100
             ),
             "guesser": EmbeddingsGuesser(seed=args.seed)
         },
-        "Improved (Cluster/Contextual)": {
+        # Cluster Spymaster combinations
+        "Cluster/Embeddings": {
             "spymaster": ClusterSpymaster(
-                vocabulary_path=args.vocabulary,
+                vocabulary_path=vocabulary_path,
+                seed=args.seed,
+                top_k=100
+            ),
+            "guesser": EmbeddingsGuesser(seed=args.seed)
+        },
+        "Cluster/Contextual": {
+            "spymaster": ClusterSpymaster(
+                vocabulary_path=vocabulary_path,
                 seed=args.seed,
                 top_k=100
             ),
             "guesser": ContextualGuesser(seed=args.seed)
         },
-        "Improved (Cluster/Adaptive)": {
+        "Cluster/Adaptive": {
             "spymaster": ClusterSpymaster(
-                vocabulary_path=args.vocabulary,
+                vocabulary_path=vocabulary_path,
+                seed=args.seed,
+                top_k=100
+            ),
+            "guesser": AdaptiveGuesser(seed=args.seed)
+        },
+        # Embeddings Spymaster with improved guessers
+        "Embeddings/Contextual": {
+            "spymaster": EmbeddingsSpymaster(
+                vocabulary_path=vocabulary_path,
+                seed=args.seed,
+                top_k=100
+            ),
+            "guesser": ContextualGuesser(seed=args.seed)
+        },
+        "Embeddings/Adaptive": {
+            "spymaster": EmbeddingsSpymaster(
+                vocabulary_path=vocabulary_path,
                 seed=args.seed,
                 top_k=100
             ),
@@ -112,8 +161,8 @@ Examples:
     print("="*70)
     print("COMPARING BASELINE VS IMPROVED AGENTS")
     print("="*70)
-    print(f"Wordlist: {args.wordlist}")
-    print(f"Vocabulary: {args.vocabulary}")
+    print(f"Wordlist: {wordlist_path}")
+    print(f"Vocabulary: {vocabulary_path}")
     print(f"Games per config: {args.num_games}")
     print(f"Starting seed: {args.start_seed}")
     print()
@@ -123,7 +172,7 @@ Examples:
     
     results = compare_agents(
         agent_configs=configs,
-        wordlist_path=args.wordlist,
+        wordlist_path=wordlist_path,
         num_games=args.num_games,
         seeds=seeds,
         verbose=args.verbose
@@ -152,8 +201,8 @@ Examples:
     if args.output:
         output_data = {
             "config": {
-                "wordlist": args.wordlist,
-                "vocabulary": args.vocabulary,
+                "wordlist": wordlist_path,
+                "vocabulary": vocabulary_path,
                 "num_games": args.num_games,
                 "start_seed": args.start_seed,
                 "agent_seed": args.seed

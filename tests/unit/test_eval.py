@@ -1,8 +1,5 @@
 """Tests for evaluation harness and metrics."""
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from codenames_rl.agents.baselines import (
@@ -18,50 +15,6 @@ from codenames_rl.eval import (
     compare_agents,
     compute_metrics,
 )
-
-
-@pytest.fixture
-def temp_vocabulary():
-    """Create a temporary vocabulary file for testing."""
-    vocab_words = [
-        "apple", "banana", "cherry", "dog", "elephant",
-        "forest", "guitar", "house", "island", "jungle",
-        "kitchen", "laptop", "mountain", "notebook", "ocean",
-        "piano", "queen", "river", "sunset", "tree",
-        "umbrella", "violin", "water", "xylophone", "yellow",
-        "zebra", "animal", "fruit", "music", "nature"
-    ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-        f.write('\n'.join(vocab_words))
-        temp_path = f.name
-    
-    yield temp_path
-    
-    # Cleanup
-    Path(temp_path).unlink(missing_ok=True)
-
-
-@pytest.fixture
-def temp_wordlist():
-    """Create a temporary wordlist file for testing."""
-    words = [
-        "car", "book", "phone", "chair", "lamp",
-        "desk", "window", "door", "wall", "floor",
-        "ceiling", "table", "pen", "paper", "ink",
-        "light", "dark", "sun", "moon", "star",
-        "cloud", "rain", "snow", "wind", "storm",
-        "fire", "ice", "metal", "wood", "stone"
-    ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-        f.write('\n'.join(words))
-        temp_path = f.name
-    
-    yield temp_path
-    
-    # Cleanup
-    Path(temp_path).unlink(missing_ok=True)
 
 
 class TestGameResult:
@@ -322,4 +275,5 @@ class TestCompareAgents:
         assert "Embeddings" in results
         assert isinstance(results["Random"], EvaluationMetrics)
         assert isinstance(results["Embeddings"], EvaluationMetrics)
+
 

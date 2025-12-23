@@ -12,7 +12,13 @@ from .baselines import (
     RandomGuesser,
     RandomSpymaster,
 )
-from .improved import AdaptiveGuesser, ClusterSpymaster, ContextualGuesser
+from .improved import (
+    AdaptiveGuesser,
+    ClusterSpymaster,
+    ContextualGuesser,
+    CrossEncoderGuesser,
+    CrossEncoderSpymaster,
+)
 
 __all__ = [
     "BaseSpymaster",
@@ -28,4 +34,6 @@ __all__ = [
     "ClusterSpymaster",
     "ContextualGuesser",
     "AdaptiveGuesser",
+    "CrossEncoderSpymaster",
+    "CrossEncoderGuesser",
 ]

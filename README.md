@@ -189,6 +189,19 @@ pytest -q -m "not slow"  # Skip LLM tests
 python scripts/run_eval.py --config configs/base.yaml --split eval
 ```
 
+5) Run the interactive Streamlit app:
+```bash
+streamlit run src/codenames_rl/app/app.py
+```
+
+The app will open in your browser at `http://localhost:8501` and provides:
+- Interactive 5×5 word board
+- Spymaster view toggle (reveals card colors)
+- Language selection (English/French)
+- Seed control for reproducible games
+- Turn-based gameplay (Spymaster gives clues, Guesser makes guesses)
+- Game history sidebar
+
 ---
 
 ## Game Modes

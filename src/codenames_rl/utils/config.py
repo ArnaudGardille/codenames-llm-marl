@@ -28,6 +28,37 @@ def _get_path(key: str, default: str) -> str:
     return str(path if path.is_absolute() else project_root / value)
 
 
+def get_language_paths(lang: str) -> tuple[str, str]:
+    """Get wordlist and vocabulary paths for a given language code.
+    
+    Args:
+        lang: Language code ("en" or "fr")
+        
+    Returns:
+        Tuple of (wordlist_path, vocabulary_path) as absolute paths
+        
+    Raises:
+        ValueError: If language code is not supported
+    """
+    supported_languages = {
+        "en": ("configs/wordlist_en.txt", "configs/vocabulary_en.txt"),
+        "fr": ("configs/wordlist_fr.txt", "configs/vocabulary_fr.txt"),
+    }
+    
+    if lang not in supported_languages:
+        raise ValueError(
+            f"Unsupported language code: {lang}. Supported languages: {list(supported_languages.keys())}"
+        )
+    
+    wordlist_rel, vocabulary_rel = supported_languages[lang]
+    # Resolve paths relative to project root (don't check env vars for language-specific paths)
+    wordlist_path = Path(wordlist_rel)
+    vocabulary_path = Path(vocabulary_rel)
+    
+    return str(wordlist_path if wordlist_path.is_absolute() else project_root / wordlist_path), \
+           str(vocabulary_path if vocabulary_path.is_absolute() else project_root / vocabulary_path)
+
+
 # Game Environment Settings
 MAX_TURNS = _get("MAX_TURNS", 20, int)
 MAX_GUESSES = _get("MAX_GUESSES", 9, int)

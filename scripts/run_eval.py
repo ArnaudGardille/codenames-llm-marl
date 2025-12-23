@@ -24,6 +24,7 @@ from codenames_rl.utils.config import (
     AGENT_SEED,
     WORDLIST_PATH,
     VOCABULARY_PATH,
+    get_language_paths,
 )
 
 
@@ -72,8 +73,7 @@ def main():
 Examples:
   # Evaluate embeddings baseline (EN)
   python scripts/run_eval.py \\
-      --wordlist configs/wordlist_en.txt \\
-      --vocabulary configs/vocabulary_en.txt \\
+      --lang en \\
       --spymaster embeddings \\
       --guesser embeddings \\
       --num-games 100 \\
@@ -81,8 +81,7 @@ Examples:
 
   # Evaluate random baseline (FR)
   python scripts/run_eval.py \\
-      --wordlist configs/wordlist_fr.txt \\
-      --vocabulary configs/vocabulary_fr.txt \\
+      --lang fr \\
       --spymaster random \\
       --guesser random \\
       --num-games 50 \\
@@ -90,23 +89,29 @@ Examples:
 
   # Compare configurations
   python scripts/run_eval.py \\
-      --wordlist configs/wordlist_en.txt \\
-      --vocabulary configs/vocabulary_en.txt \\
+      --lang en \\
       --compare
         """
     )
     
     parser.add_argument(
+        "--lang",
+        type=str,
+        choices=["en", "fr"],
+        default=None,
+        help="Language code (en/fr). Sets both wordlist and vocabulary paths."
+    )
+    parser.add_argument(
         "--wordlist",
         type=str,
-        default=WORDLIST_PATH,
-        help=f"Path to wordlist file for board generation (default: {WORDLIST_PATH})"
+        default=None,
+        help=f"Path to wordlist file for board generation (default: {WORDLIST_PATH}, or from --lang)"
     )
     parser.add_argument(
         "--vocabulary",
         type=str,
-        default=VOCABULARY_PATH,
-        help=f"Path to vocabulary file for clue generation (default: {VOCABULARY_PATH})"
+        default=None,
+        help=f"Path to vocabulary file for clue generation (default: {VOCABULARY_PATH}, or from --lang)"
     )
     parser.add_argument(
         "--spymaster",
@@ -170,15 +175,25 @@ Examples:
     
     args = parser.parse_args()
     
+    # Resolve wordlist and vocabulary paths
+    # Priority: explicit paths > --lang > defaults
+    if args.lang:
+        lang_wordlist, lang_vocabulary = get_language_paths(args.lang)
+        wordlist_path = args.wordlist if args.wordlist else lang_wordlist
+        vocabulary_path = args.vocabulary if args.vocabulary else lang_vocabulary
+    else:
+        wordlist_path = args.wordlist if args.wordlist else WORDLIST_PATH
+        vocabulary_path = args.vocabulary if args.vocabulary else VOCABULARY_PATH
+    
     # Validate vocabulary path for non-random, non-llm spymasters
-    if args.spymaster not in ["random", "llm"] and not args.vocabulary:
-        parser.error("--vocabulary required for non-random, non-llm spymaster")
+    if args.spymaster not in ["random", "llm"] and not vocabulary_path:
+        parser.error("--vocabulary or --lang required for non-random, non-llm spymaster")
     
     if args.compare:
         # Compare all combinations
         print("Comparing baseline agent combinations...")
-        print(f"Wordlist: {args.wordlist}")
-        print(f"Vocabulary: {args.vocabulary}")
+        print(f"Wordlist: {wordlist_path}")
+        print(f"Vocabulary: {vocabulary_path}")
         print(f"Games per config: {args.num_games}")
         print(f"Starting seed: {args.start_seed}\n")
         
@@ -186,30 +201,30 @@ Examples:
         
         # Random-Random
         configs["Random/Random"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": RandomGuesser(seed=args.seed)
         }
         
         # Random-Embeddings
         configs["Random/Embeddings"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": EmbeddingsGuesser(seed=args.seed)
         }
         
         # Embeddings-Random
         configs["Embeddings/Random"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": RandomGuesser(seed=args.seed)
         }
         
         # Embeddings-Embeddings
         configs["Embeddings/Embeddings"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": EmbeddingsGuesser(seed=args.seed)
         }
         
         # QwenEmbedding-QwenEmbedding (share model to save memory)
-        qwen_emb_spymaster = QwenEmbeddingSpymaster(vocabulary_path=args.vocabulary, seed=args.seed)
+        qwen_emb_spymaster = QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=args.seed)
         configs["QwenEmbedding/QwenEmbedding"] = {
             "spymaster": qwen_emb_spymaster,
             "guesser": QwenEmbeddingGuesser(
@@ -222,13 +237,13 @@ Examples:
         
         # QwenEmbedding-Embeddings
         configs["QwenEmbedding/Embeddings"] = {
-            "spymaster": QwenEmbeddingSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": EmbeddingsGuesser(seed=args.seed)
         }
         
         # Embeddings-QwenEmbedding
         configs["Embeddings/QwenEmbedding"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": QwenEmbeddingGuesser(seed=args.seed)
         }
         
@@ -252,7 +267,7 @@ Examples:
         
         # Embeddings-LLM
         configs["Embeddings/LLM"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": LLMGuesser(seed=args.seed)
         }
         
@@ -264,7 +279,7 @@ Examples:
         
         # Random-LLM
         configs["Random/LLM"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=args.vocabulary, seed=args.seed),
+            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
             "guesser": LLMGuesser(seed=args.seed)
         }
         
@@ -272,7 +287,7 @@ Examples:
         
         results = compare_agents(
             agent_configs=configs,
-            wordlist_path=args.wordlist,
+            wordlist_path=wordlist_path,
             num_games=args.num_games,
             seeds=list(range(args.start_seed, args.start_seed + args.num_games)),
             verbose=args.verbose
@@ -303,16 +318,16 @@ Examples:
     else:
         # Single configuration
         print(f"Evaluating: {args.spymaster.title()} Spymaster + {args.guesser.title()} Guesser")
-        print(f"Wordlist: {args.wordlist}")
-        if args.vocabulary:
-            print(f"Vocabulary: {args.vocabulary}")
+        print(f"Wordlist: {wordlist_path}")
+        if vocabulary_path:
+            print(f"Vocabulary: {vocabulary_path}")
         print(f"Games: {args.num_games}")
         print(f"Starting seed: {args.start_seed}\n")
         
         # Create agents
         spymaster = create_agent(
             f"{args.spymaster}_spymaster",
-            vocabulary_path=args.vocabulary,
+            vocabulary_path=vocabulary_path,
             seed=args.seed
         )
         
@@ -339,7 +354,7 @@ Examples:
         
         # Run evaluation
         harness = EvaluationHarness(
-            wordlist_path=args.wordlist,
+            wordlist_path=wordlist_path,
             spymaster=spymaster,
             guesser=guesser,
             max_turns=args.max_turns,
@@ -363,8 +378,8 @@ Examples:
                 "config": {
                     "spymaster": args.spymaster,
                     "guesser": args.guesser,
-                    "wordlist": args.wordlist,
-                    "vocabulary": args.vocabulary,
+                    "wordlist": wordlist_path,
+                    "vocabulary": vocabulary_path,
                     "num_games": args.num_games,
                     "start_seed": args.start_seed,
                     "agent_seed": args.seed
