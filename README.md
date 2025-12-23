@@ -93,8 +93,8 @@ codenames-rl/
       validation.py        # clue validator
       generators.py        # board generation
     agents/
-      baselines.py         # random / embeddings / prudent
-      llm_policy.py        # model wrapper -> action
+      baselines.py         # random / embeddings / LLM (zero-shot)
+      llm_policy.py        # model wrapper -> action (fine-tuned)
       reranker.py          # sampling + external scoring
     training/
       sft.py
@@ -154,15 +154,133 @@ pip install -e ".[dev]"
 python -m codenames_rl.eval.harness --config configs/base.yaml --agent baseline_embeddings
 ```
 
-2) Run the test suite:
-```bash
-pytest -q
+2) Run with LLM baseline (requires GPU):
+```python
+from codenames_rl.agents.baselines import LLMSpymaster, LLMGuesser
+
+# Zero-shot inference with Qwen2.5-7B-Instruct (FP16, ~14GB VRAM)
+# Downloads model automatically on first run (~14GB, cached)
+spymaster = LLMSpymaster(seed=42, temperature=0.7)
+guesser = LLMGuesser(seed=42, temperature=0.7)
+
+# Share model between agents to save memory
+guesser_shared = LLMGuesser(
+    model=spymaster.model,
+    tokenizer=spymaster.tokenizer,
+    seed=42
+)
 ```
 
-3) Evaluate on the frozen benchmark:
+**Getting the full 7B model:** See [`doc/GET_LLM.md`](doc/GET_LLM.md) or run:
+```bash
+python scripts/download_and_test_llm.py
+```
+
+**Apple Silicon (M1/M2/M3/M4):** See [`doc/APPLE_SILICON.md`](doc/APPLE_SILICON.md) for MPS-optimized setup.
+
+3) Run the test suite:
+```bash
+pytest -q
+pytest -q -m "not slow"  # Skip LLM tests
+```
+
+4) Evaluate on the frozen benchmark:
 ```bash
 python scripts/run_eval.py --config configs/base.yaml --split eval
 ```
+
+---
+
+## Game Modes
+
+This project supports two distinct modes for different training and evaluation scenarios:
+
+### 1. Cooperative Mode (2-Player)
+
+**Environment**: `CodenamesEnv` (Gymnasium)
+
+You control ONE team (Spymaster + Guesser) working together:
+- **Your agents**: Spymaster gives clues, Guesser makes guesses
+- **Opponent cards**: Passive obstacles (not controlled by another team)
+- **Goal**: Find all your team's words before hitting the assassin
+- **Use case**: Simpler training scenario, faster iteration
+
+```python
+from codenames_rl.env import CodenamesEnv
+
+env = CodenamesEnv(wordlist_path="configs/wordlist_en.txt")
+obs, info = env.reset(seed=42)
+
+# Your spymaster gives a clue
+spymaster_action = spymaster.get_clue(obs)
+obs, reward, done, truncated, info = env.step(spymaster_action)
+
+# Your guesser makes guesses
+guesser_action = guesser.get_guess(obs)
+obs, reward, done, truncated, info = env.step(guesser_action)
+```
+
+### 2. Adversarial Mode (4-Player Competitive)
+
+**Environments**: 
+- `CodenamesAdversarialPZ` (PettingZoo) - for multi-agent research
+- `CodenamesAdversarialGym` (Gymnasium + self-play) - for TRL training
+
+True 4-player competition with two teams:
+- **Team A**: Your agents (Spymaster + Guesser)
+- **Team B**: Opponent agents (Spymaster + Guesser)
+- **Teams alternate**: Team A plays full turn, then Team B plays
+- **Goal**: Be the first team to find all your words
+- **Use case**: Self-play training, competitive evaluation
+
+#### PettingZoo Interface (Multi-Agent Control)
+```python
+from codenames_rl.env.adversarial_pz import env as make_env
+
+env = make_env(wordlist_path="configs/wordlist_en.txt")
+env.reset(seed=42)
+
+# Control all 4 agents
+agents = {
+    'team_a_spymaster': LLMSpymaster(seed=42),
+    'team_a_guesser': LLMGuesser(seed=42),
+    'team_b_spymaster': EmbeddingsSpymaster(...),
+    'team_b_guesser': EmbeddingsGuesser(...),
+}
+
+for agent in env.agent_iter():
+    obs = env.observe(agent)
+    action = agents[agent].get_action(obs)
+    env.step(action)
+```
+
+#### Gymnasium Self-Play Interface (TRL Compatible)
+```python
+from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
+
+# Opponent uses frozen policies
+opponent_spy = EmbeddingsSpymaster(...)
+opponent_guess = EmbeddingsGuesser(...)
+
+env = CodenamesAdversarialGym(
+    wordlist_path="configs/wordlist_en.txt",
+    opponent_spymaster_policy=opponent_spy.get_clue,
+    opponent_guesser_policy=opponent_guess.get_guess
+)
+
+# TRL sees this as single-agent environment
+obs, info = env.reset(seed=42)
+
+# Your turn (Team A)
+action = your_agent.get_action(obs)
+obs, reward, done, truncated, info = env.step(action)
+# Opponent's turn executes automatically inside step()
+```
+
+**Training Progression**:
+1. Start with **cooperative mode** for initial training (simpler, faster)
+2. Move to **adversarial mode** for advanced training (self-play, competition)
+3. Use **self-play curriculum**: weak opponents → strong opponents → self
 
 ---
 
@@ -185,6 +303,7 @@ python scripts/run_eval.py --config configs/base.yaml --split eval
 - **Random**: uniform sampling (lower bound)
 - **Embeddings-based Spymaster**: `score(clue) = sim(clue, team_words) - α·sim(clue, enemies+assassin) - β·sim(clue, neutrals)`. Generate K candidates from allowed vocabulary, pick best.
 - **Embeddings-based Guesser**: rank unrevealed words by similarity to clue, pick top-N
+- **LLM-based (Qwen2.5-7B-Instruct)**: zero-shot prompting with chat format and JSON output parsing, strict validation
 - **Prudent**: hard filters rejecting any clue too close to assassin/opponent
 
 > Start here even if you want to finetune. Baselines provide (1) an immediate benchmark and (2) a data generator for SFT.
@@ -233,8 +352,34 @@ python scripts/run_eval.py --config configs/base.yaml --split eval
 - **Warning:** RL on Codenames is notoriously hard (sparse rewards, combinatorial actions, easy to learn "cheats"). Only attempt after SFT+DPO are stable.
 - Recommended strategy:
   - **reduce action space**: instead of free-form generation, have the model propose N candidates then classify/rank (much easier to optimize)
-  - **alternating self-play**: train one role while the other is frozen
+  - **self-play with adversarial mode**: train one team while opponent uses frozen policies
   - **reward shaping**: strong penalties for assassin proximity, invalid clues
+
+**Self-Play Training Example**:
+```python
+from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
+
+# Phase 1: Train against weak baseline
+opponent_spy = RandomSpymaster(...)
+opponent_guess = RandomGuesser(...)
+
+env = CodenamesAdversarialGym(
+    wordlist_path="configs/wordlist_en.txt",
+    opponent_spymaster_policy=opponent_spy.get_clue,
+    opponent_guesser_policy=opponent_guess.get_guess
+)
+
+# Train with TRL
+trainer = GRPOTrainer(model, env, ...)
+trainer.train()
+
+# Phase 2: Freeze trained model, use as opponent
+# Train next generation against previous version
+opponent_spy_v2 = load_trained_model("checkpoint_v1")
+opponent_guess_v2 = load_trained_model("checkpoint_v1")
+
+# Continue training...
+```
 
 **Deliverable:** RL checkpoint + stable evaluation (controlled variance).
 
@@ -256,6 +401,40 @@ python scripts/run_eval.py --config configs/base.yaml --split eval
 - Assassin hit rate
 - Average game length
 - Performance vs baselines (A/B)
+
+### Running Evaluations
+
+**Cooperative Mode (2-player)**:
+```bash
+# Single configuration
+python scripts/run_eval.py \
+    --wordlist configs/wordlist_en.txt \
+    --vocabulary configs/vocabulary_en.txt \
+    --spymaster llm \
+    --guesser llm \
+    --num-games 100
+
+# Compare all baselines
+python scripts/run_eval.py \
+    --wordlist configs/wordlist_en.txt \
+    --vocabulary configs/vocabulary_en.txt \
+    --compare \
+    --num-games 100
+```
+
+**Adversarial Mode (4-player competitive)**:
+```bash
+# LLM team vs Embeddings team
+python scripts/run_eval_adversarial.py \
+    --wordlist configs/wordlist_en.txt \
+    --vocabulary configs/vocabulary_en.txt \
+    --red-spymaster llm \
+    --red-guesser llm \
+    --blue-spymaster embeddings \
+    --blue-guesser embeddings \
+    --num-games 50 \
+    --output results/llm_vs_embeddings.json
+```
 
 ---
 
@@ -339,8 +518,8 @@ STOP
 ## Suggested Roadmap
 
 **Foundation**
-- [ ] Complete env + strict clue validator
-- [ ] Baselines: random + embeddings + prudent (both roles)
+- [x] Complete env + strict clue validator
+- [x] Baselines: random + embeddings + LLM (zero-shot) for both roles
 - [ ] Evaluation harness + local leaderboard
 
 **Data**
@@ -363,10 +542,13 @@ STOP
 
 ## Model & Training Approach
 
-This project targets **7B/8B instruct models** trained with **QLoRA** on 24 GB GPUs.  
-Exact selection depends on language (EN/FR), licensing, and instruction-following quality.
+This project uses **Qwen2.5-7B-Instruct** as the base model (MIT license, multilingual EN/FR support, excellent instruction-following).
 
-**Recommended approach: Hybrid**
+**Training approach:**
+- **Baseline (zero-shot)**: FP16 inference with chat-based prompting and JSON output validation (already implemented)
+- **Fine-tuning**: QLoRA (LoRA adapters) on 24 GB GPUs for SFT → DPO → GRPO pipeline
+
+**Recommended hybrid approach:**
 - LLM proposes candidates (creative, contextual)
 - Embeddings score/rank candidates (safety, relevance)
 - Code enforces rules (no invalid clues reach the game)
