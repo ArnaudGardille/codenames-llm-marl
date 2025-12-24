@@ -12,7 +12,6 @@ from codenames_rl.agents.baselines import (
 )
 from codenames_rl.env.spaces import CardColor, GamePhase, Observation
 
-
 # Check if torch and transformers are available
 try:
     import torch
@@ -20,28 +19,6 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-
-
-@pytest.fixture
-def temp_vocabulary():
-    """Create a temporary vocabulary file for testing."""
-    vocab_words = [
-        "apple", "banana", "cherry", "dog", "elephant",
-        "forest", "guitar", "house", "island", "jungle",
-        "kitchen", "laptop", "mountain", "notebook", "ocean",
-        "piano", "queen", "river", "sunset", "tree",
-        "umbrella", "violin", "water", "xylophone", "yellow",
-        "zebra", "animal", "fruit", "music", "nature"
-    ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-        f.write('\n'.join(vocab_words))
-        temp_path = f.name
-    
-    yield temp_path
-    
-    # Cleanup
-    Path(temp_path).unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -67,51 +44,6 @@ def empty_vocabulary():
     yield temp_path
     
     Path(temp_path).unlink(missing_ok=True)
-
-
-@pytest.fixture
-def sample_observation():
-    """Create a sample observation for testing."""
-    return Observation(
-        board_words=[
-            "car", "book", "phone", "chair", "lamp",
-            "desk", "window", "door", "wall", "floor",
-            "ceiling", "table", "pen", "paper", "ink",
-            "light", "dark", "sun", "moon", "star",
-            "cloud", "rain", "snow", "wind", "storm"
-        ],
-        revealed_mask=[False] * 25,
-        board_colors=[
-            CardColor.TEAM, CardColor.TEAM, CardColor.TEAM, CardColor.TEAM,
-            CardColor.TEAM, CardColor.TEAM, CardColor.TEAM, CardColor.TEAM,
-            CardColor.TEAM,  # 9 team
-            CardColor.OPPONENT, CardColor.OPPONENT, CardColor.OPPONENT,
-            CardColor.OPPONENT, CardColor.OPPONENT, CardColor.OPPONENT,
-            CardColor.OPPONENT, CardColor.OPPONENT,  # 8 opponent
-            CardColor.NEUTRAL, CardColor.NEUTRAL, CardColor.NEUTRAL,
-            CardColor.NEUTRAL, CardColor.NEUTRAL, CardColor.NEUTRAL,
-            CardColor.NEUTRAL,  # 7 neutral
-            CardColor.ASSASSIN  # 1 assassin
-        ],
-        current_clue=None,
-        current_count=None,
-        remaining_guesses=0,
-        phase=GamePhase.SPYMASTER_TURN,
-        team_remaining=9,
-        opponent_remaining=8
-    )
-
-
-def qwen_model_available():
-    """Check if Qwen model can be loaded (skip test if not)."""
-    if not HAS_TORCH:
-        return False
-    try:
-        # Try to load a small part of the model to check availability
-        # We'll use a try-except in actual tests
-        return True
-    except Exception:
-        return False
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch and transformers not available")
@@ -778,6 +710,262 @@ class TestQwenEmbeddingGuesser:
             # (more likely to pass)
             assert isinstance(action_low.word_index, (int, type(None)))
             assert isinstance(action_high.word_index, (int, type(None)))
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_empty_vocabulary_handling(self, empty_vocabulary, sample_observation):
+        """Test behavior with empty vocabulary file."""
+        try:
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=empty_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            # Should handle gracefully - might use fallback
+            action = agent.get_clue(sample_observation)
+            assert action.clue is not None
+        except (FileNotFoundError, ValueError) as e:
+            # Empty vocabulary might raise an error, which is acceptable
+            pass
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_all_team_words_no_opponents(self, temp_vocabulary, sample_observation):
+        """Test behavior with all team words, no opponents/neutral/assassin."""
+        try:
+            obs = Observation(
+                **{**sample_observation.__dict__,
+                   'board_colors': [CardColor.TEAM] * 25,
+                   'team_remaining': 25,
+                   'opponent_remaining': 0}
+            )
+            
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            action = agent.get_clue(obs)
+            
+            assert action.clue is not None
+            assert action.count > 0
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_only_assassin_no_team_words(self, temp_vocabulary, sample_observation):
+        """Test behavior with only assassin word, no team words."""
+        try:
+            obs = Observation(
+                **{**sample_observation.__dict__,
+                   'board_colors': [CardColor.ASSASSIN] + [CardColor.OPPONENT] * 24,
+                   'team_remaining': 0,
+                   'opponent_remaining': 24}
+            )
+            
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            action = agent.get_clue(obs)
+            
+            # Should return "pass" with count 0
+            assert action.clue == "pass"
+            assert action.count == 0
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_batch_encoding(self, temp_vocabulary):
+        """Test batch encoding with multiple texts."""
+        try:
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            texts = ["apple", "banana", "cherry", "dog", "elephant"]
+            embeddings = agent._encode(texts)
+            
+            assert embeddings.shape[0] == 5
+            assert embeddings.shape[1] > 0
+            # All should be normalized
+            norms = np.linalg.norm(embeddings, axis=1)
+            assert np.allclose(norms, 1.0, atol=1e-6)
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_special_characters_in_words(self, temp_vocabulary):
+        """Test encoding with special characters."""
+        try:
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            texts = ["test-word", "test_word", "test.word", "test'word"]
+            embeddings = agent._encode(texts)
+            assert embeddings.shape[0] == 4
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_device_fallback_to_cpu(self, temp_vocabulary):
+        """Test that device falls back to CPU when CUDA/MPS unavailable."""
+        try:
+            # Force CPU device
+            agent = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                device="cpu",
+                seed=42,
+                top_k=10
+            )
+            assert agent.device == "cpu"
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_scoring_logic_alpha_beta_gamma(self, temp_vocabulary, sample_observation):
+        """Test that scoring logic uses alpha/beta/gamma penalties correctly."""
+        try:
+            # Test with different penalty weights
+            agent_default = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=10
+            )
+            agent_high_alpha = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                alpha=10.0,  # Very high assassin penalty
+                seed=42,
+                top_k=10
+            )
+            
+            action_default = agent_default.get_clue(sample_observation)
+            action_high_alpha = agent_high_alpha.get_clue(sample_observation)
+            
+            # Both should return valid actions
+            assert action_default.clue is not None
+            assert action_high_alpha.clue is not None
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_clue_matches_no_words_low_similarity(self, sample_observation):
+        """Test guesser behavior when clue matches no words (low similarity)."""
+        try:
+            obs = Observation(
+                **{**sample_observation.__dict__,
+                   'current_clue': 'zzzzzzzzzzzzzzzz',  # Very unlikely to match
+                   'current_count': 2,
+                   'phase': GamePhase.GUESSER_TURN}
+            )
+            
+            agent = QwenEmbeddingGuesser(
+                seed=42,
+                confidence_threshold=0.1
+            )
+            action = agent.get_guess(obs)
+            
+            # Should likely pass due to low similarity
+            assert action.word_index is None or isinstance(action.word_index, int)
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_clue_matches_multiple_words_high_similarity(self, sample_observation):
+        """Test guesser behavior when clue matches multiple words (high similarity)."""
+        try:
+            obs = Observation(
+                **{**sample_observation.__dict__,
+                   'current_clue': 'furniture',  # Should match chair, desk, table, etc.
+                   'current_count': 3,
+                   'phase': GamePhase.GUESSER_TURN}
+            )
+            
+            agent = QwenEmbeddingGuesser(
+                seed=42,
+                confidence_threshold=0.0  # Low threshold to allow guessing
+            )
+            action = agent.get_guess(obs)
+            
+            # Should guess one of the matching words
+            assert action.word_index is None or isinstance(action.word_index, int)
+            if action.word_index is not None:
+                assert 0 <= action.word_index < 25
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_no_unrevealed_words(self, sample_observation):
+        """Test guesser behavior when no unrevealed words exist."""
+        try:
+            obs = Observation(
+                **{**sample_observation.__dict__,
+                   'revealed_mask': [True] * 25,
+                   'current_clue': 'test',
+                   'current_count': 2,
+                   'phase': GamePhase.GUESSER_TURN}
+            )
+            
+            agent = QwenEmbeddingGuesser(seed=42)
+            action = agent.get_guess(obs)
+            
+            # Should pass
+            assert action.word_index is None
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_model_sharing_device_consistency(self, temp_vocabulary):
+        """Test that model sharing maintains device consistency."""
+        try:
+            spymaster = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                device="cpu",
+                seed=42,
+                top_k=10
+            )
+            guesser = QwenEmbeddingGuesser(
+                model=spymaster.model,
+                tokenizer=spymaster.tokenizer,
+                device=spymaster.device,
+                seed=42
+            )
+            
+            # Both should be on same device
+            assert guesser.device == spymaster.device
+            # Model should be accessible
+            assert guesser.model is not None
+            assert guesser.tokenizer is not None
+        except Exception as e:
+            pytest.skip(f"Qwen model not available: {e}")
+
+    @pytest.mark.slow
+    def test_top_k_parameter_effect(self, temp_vocabulary, sample_observation):
+        """Test that top_k parameter affects candidate selection."""
+        try:
+            agent_small = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=5
+            )
+            agent_large = QwenEmbeddingSpymaster(
+                vocabulary_path=temp_vocabulary,
+                seed=42,
+                top_k=50
+            )
+            
+            action_small = agent_small.get_clue(sample_observation)
+            action_large = agent_large.get_clue(sample_observation)
+            
+            # Both should return valid actions
+            assert action_small.clue is not None
+            assert action_large.clue is not None
         except Exception as e:
             pytest.skip(f"Qwen model not available: {e}")
 

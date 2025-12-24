@@ -359,7 +359,7 @@ The Guesser sees only the board words (not labels) and must identify team words 
 
 #### 7. **LLMGuesser**
 
-**Strategy**: Use a large language model (Qwen2.5-7B-Instruct) to interpret clues and select the most relevant word.
+**Strategy**: Use a large language model to interpret clues and select the most relevant word.
 
 **Prompt Structure**:
 

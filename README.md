@@ -63,81 +63,12 @@ The game is modeled as a Markov Decision Process:
 - Exploration is controlled: prefer **"propose K candidates then choose"** over "invent any clue".
 - **Hybrid approach recommended**: LLM generates candidates, embeddings + heuristics score/filter, code enforces rules.
 
----
-
-## Recommended Tech Stack
-
-- **Python 3.10+**
-- **Gymnasium**: standard `reset/step` API, wrappers, reproducibility.
-- **Transformers + Accelerate**
-- **PEFT + bitsandbytes**: LoRA / QLoRA (fits well on 24 GB GPUs)
-- **TRL**: SFT, DPO, GRPO (online RL)
-- **pytest**: tests
-- **DeepEval**: LLM output tests (format, constraints, rubrics)
-- Dev tools: `ruff`, `mypy`, `pre-commit`
-
-> GPU note: an RTX 3090 / 24 GB is a good fit for **7B/8B** models with **QLoRA** for SFT/DPO and a reasonable GRPO setup (small batches, short sequences).
-
----
-
-## Repository Layout
-
-```
-codenames-rl/
-  pyproject.toml
-  README.md
-  src/codenames_rl/
-    env/
-      core.py              # rules, transitions, terminal conditions
-      spaces.py            # observation/action schemas
-      validation.py        # clue validator
-      generators.py        # board generation
-    agents/
-      baselines.py         # random / embeddings / LLM (zero-shot)
-      llm_policy.py        # model wrapper -> action (fine-tuned)
-      reranker.py          # sampling + external scoring
-    training/
-      sft.py
-      dpo.py
-      grpo.py              # TRL
-      rewards.py           # reward shaping + logs
-    eval/
-      harness.py           # evaluation on frozen seeds
-      metrics.py
-      leaderboards.py
-    data/
-      schemas.py           # dataclasses/pydantic logs
-      io.py                # jsonl/parquet
-    utils/
-      seeds.py
-      logging.py
-  tests/
-    unit/
-    property/
-    integration/
-    e2e/
-  configs/
-    base.yaml
-    sft.yaml
-    dpo.yaml
-    grpo.yaml
-  scripts/
-    make_dataset.py
-    run_eval.py
-```
-
----
+-
 
 ## Installation
 
-### Option 1: `uv` (fast)
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-```
 
-### Option 2: `pip`
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -158,8 +89,7 @@ python -m codenames_rl.eval.harness --config configs/base.yaml --agent baseline_
 ```python
 from codenames_rl.agents.baselines import LLMSpymaster, LLMGuesser
 
-# Zero-shot inference with Qwen2.5-7B-Instruct (FP16, ~14GB VRAM)
-# Downloads model automatically on first run (~14GB, cached)
+# Downloads model automatically on first run
 spymaster = LLMSpymaster(seed=42, temperature=0.7)
 guesser = LLMGuesser(seed=42, temperature=0.7)
 
@@ -295,108 +225,7 @@ obs, reward, done, truncated, info = env.step(action)
 2. Move to **adversarial mode** for advanced training (self-play, competition)
 3. Use **self-play curriculum**: weak opponents → strong opponents → self
 
----
 
-## Project Steps (Pipeline)
-
-### Step 0 — Environment (foundation)
-- Implement `CodenamesEnv` (Gymnasium):
-  - `reset(seed)`: generates a reproducible board
-  - `step(action)`: applies an action and returns `obs, reward, terminated, truncated, info`
-- Enforce **all** rules in code:
-  - clue is **one word**
-  - clue is **not on the board**
-  - correct transitions (turn, terminal states, assassin)
-
-**Deliverable:** deterministic env + unit tests for rules.
-
----
-
-### Step 1 — Baselines
-- **Random**: uniform sampling (lower bound)
-- **Embeddings-based Spymaster**: `score(clue) = sim(clue, team_words) - α·sim(clue, enemies+assassin) - β·sim(clue, neutrals)`. Generate K candidates from allowed vocabulary, pick best.
-- **Embeddings-based Guesser**: rank unrevealed words by similarity to clue, pick top-N
-- **LLM-based (Qwen2.5-7B-Instruct)**: zero-shot prompting with chat format and JSON output parsing, strict validation
-- **Prudent**: hard filters rejecting any clue too close to assassin/opponent
-
-> Start here even if you want to finetune. Baselines provide (1) an immediate benchmark and (2) a data generator for SFT.
-
-**Deliverable:** evaluation scripts + reference curves.
-
----
-
-### Step 2 — Data Generation (traces)
-- Let (baseline spymaster / baseline guesser) play and log:
-  - observation → action → outcome
-- Recommended storage: **JSONL** (simple) or **Parquet** (fast).
-- Filtering:
-  - discard illegal clues
-  - optionally remove outliers
-
-**Deliverable:** versioned synthetic dataset + stats (size, error rate, distributions).
-
----
-
-### Step 3 — SFT (Supervised Fine-Tuning)
-- Goal: learn the action format and a plausible behavior.
-- Method: **QLoRA** on a 7B/8B instruct model.
-- **Spymaster SFT**: `(board + labels) → (clue, number)`
-- **Guesser SFT**: `(board + clue) → guess/STOP`
-- One LoRA adapter per role (modular, easier to iterate).
-
-**Deliverable:** LoRA checkpoints (spymaster + guesser) + metrics (loss, format compliance).
-
----
-
-### Step 4 — DPO (Direct Preference Optimization)
-- Build `(chosen, rejected)` pairs:
-  - For each state, generate 2–8 candidate actions
-  - Evaluate via simulation (or proxy: reward shaping + risk assessment)
-  - Pair winning vs losing candidates
-- Goal: learn useful preferences (lower risk, higher expected score).
-- More natural than supervised learning for Codenames: "clue A is better than B" is easier to define than "the one correct clue".
-
-**Deliverable:** DPO LoRA checkpoints + improvement on frozen benchmark.
-
----
-
-### Step 5 — RL (GRPO, optional / advanced)
-- Goal: squeeze extra performance via online optimization.
-- **Warning:** RL on Codenames is notoriously hard (sparse rewards, combinatorial actions, easy to learn "cheats"). Only attempt after SFT+DPO are stable.
-- Recommended strategy:
-  - **reduce action space**: instead of free-form generation, have the model propose N candidates then classify/rank (much easier to optimize)
-  - **self-play with adversarial mode**: train one team while opponent uses frozen policies
-  - **reward shaping**: strong penalties for assassin proximity, invalid clues
-
-**Self-Play Training Example**:
-```python
-from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
-
-# Phase 1: Train against weak baseline
-opponent_spy = RandomSpymaster(...)
-opponent_guess = RandomGuesser(...)
-
-env = CodenamesAdversarialGym(
-    wordlist_path="configs/wordlist_en.txt",
-    opponent_spymaster_policy=opponent_spy.get_clue,
-    opponent_guesser_policy=opponent_guess.get_guess
-)
-
-# Train with TRL
-trainer = GRPOTrainer(model, env, ...)
-trainer.train()
-
-# Phase 2: Freeze trained model, use as opponent
-# Train next generation against previous version
-opponent_spy_v2 = load_trained_model("checkpoint_v1")
-opponent_guess_v2 = load_trained_model("checkpoint_v1")
-
-# Continue training...
-```
-
-**Deliverable:** RL checkpoint + stable evaluation (controlled variance).
-
----
 
 ## Evaluation
 
@@ -526,47 +355,9 @@ STOP
 
 > The model outputs a structured response; **validation happens in code** (single word, not on board, allowed vocabulary, etc.). Invalid outputs incur penalties.
 
----
 
-## Suggested Roadmap
 
-**Foundation**
-- [x] Complete env + strict clue validator
-- [x] Baselines: random + embeddings + LLM (zero-shot) for both roles
-- [ ] Evaluation harness + local leaderboard
 
-**Data**
-- [ ] Synthetic dataset generation (baseline self-play → JSONL/Parquet)
-- [ ] Filtering pipeline (reject invalid clues, outliers)
-
-**Spymaster (priority)**
-- [ ] QLoRA SFT (spymaster)
-- [ ] DPO (spymaster)
-
-**Guesser**
-- [ ] QLoRA SFT (guesser)
-- [ ] DPO (guesser)
-
-**Advanced (optional)**
-- [ ] Alternating self-play (GRPO) + ablations
-- [ ] Final report: baselines vs SFT vs DPO vs RL
-
----
-
-## Model & Training Approach
-
-This project uses **Qwen2.5-7B-Instruct** as the base model (MIT license, multilingual EN/FR support, excellent instruction-following).
-
-**Training approach:**
-- **Baseline (zero-shot)**: FP16 inference with chat-based prompting and JSON output validation (already implemented)
-- **Fine-tuning**: QLoRA (LoRA adapters) on 24 GB GPUs for SFT → DPO → GRPO pipeline
-
-**Recommended hybrid approach:**
-- LLM proposes candidates (creative, contextual)
-- Embeddings score/rank candidates (safety, relevance)
-- Code enforces rules (no invalid clues reach the game)
-
-This gives the best of both worlds: LLM fluency + controllable safety. Pure end-to-end LLM is possible but harder to debug and constrain.
 
 ---
 
