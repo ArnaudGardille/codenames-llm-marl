@@ -58,12 +58,9 @@ The game is modeled as a Markov Decision Process:
 > **Reward shaping is critical.** Without it, RL is notoriously unstable on Codenames due to sparse rewards and combinatorial action space.
 
 ### Engineering Principles
-- Rules are **never "left to the prompt"**: clue validity and transitions are **implemented in code**.
-- The agent is constrained to a **strict action schema** (JSON / dataclasses) validated in code.
-- Exploration is controlled: prefer **"propose K candidates then choose"** over "invent any clue".
-- **Hybrid approach recommended**: LLM generates candidates, embeddings + heuristics score/filter, code enforces rules.
-
--
+- Rules enforced in code (not prompts)
+- Strict action validation (JSON schemas)
+- Hybrid approach: LLM + embeddings + code validation
 
 ## Installation
 
@@ -101,12 +98,11 @@ guesser_shared = LLMGuesser(
 )
 ```
 
-**Getting the full 7B model:** See [`doc/GET_LLM.md`](doc/GET_LLM.md) or run:
-```bash
-python scripts/download_and_test_llm.py
-```
-
-**Apple Silicon (M1/M2/M3/M4):** See [`doc/APPLE_SILICON.md`](doc/APPLE_SILICON.md) for MPS-optimized setup.
+**Model Download & Hardware:**
+- First run downloads ~14GB (Qwen2.5-7B-Instruct, cached in `~/.cache/huggingface/`)
+- GPU: RTX 3090/4090 (14GB+ VRAM) or Apple Silicon M1/M2/M3/M4 with 16GB+ unified memory (auto-detects MPS)
+- Smaller alternatives: Qwen2.5-1.5B (~3GB) or Qwen2.5-3B (~6GB)
+- Quick test: `python scripts/download_and_test_llm.py`
 
 3) Run the test suite:
 ```bash
@@ -136,113 +132,17 @@ The app will open in your browser at `http://localhost:8501` and provides:
 
 ## Game Modes
 
-This project supports two distinct modes for different training and evaluation scenarios:
+**Cooperative Mode** (`CodenamesEnv` - Gymnasium): Single team vs passive opponents. Simpler, faster training.
 
-### 1. Cooperative Mode (2-Player)
+**Adversarial Mode** (PettingZoo / Gymnasium): Full 4-player competitive (Team A vs Team B). For self-play and competitive evaluation.
 
-**Environment**: `CodenamesEnv` (Gymnasium)
-
-You control ONE team (Spymaster + Guesser) working together:
-- **Your agents**: Spymaster gives clues, Guesser makes guesses
-- **Opponent cards**: Passive obstacles (not controlled by another team)
-- **Goal**: Find all your team's words before hitting the assassin
-- **Use case**: Simpler training scenario, faster iteration
-
-```python
-from codenames_rl.env import CodenamesEnv
-
-env = CodenamesEnv(wordlist_path="configs/wordlist_en.txt")
-obs, info = env.reset(seed=42)
-
-# Your spymaster gives a clue
-spymaster_action = spymaster.get_clue(obs)
-obs, reward, done, truncated, info = env.step(spymaster_action)
-
-# Your guesser makes guesses
-guesser_action = guesser.get_guess(obs)
-obs, reward, done, truncated, info = env.step(guesser_action)
-```
-
-### 2. Adversarial Mode (4-Player Competitive)
-
-**Environments**: 
-- `CodenamesAdversarialPZ` (PettingZoo) - for multi-agent research
-- `CodenamesAdversarialGym` (Gymnasium + self-play) - for TRL training
-
-True 4-player competition with two teams:
-- **Team A**: Your agents (Spymaster + Guesser)
-- **Team B**: Opponent agents (Spymaster + Guesser)
-- **Teams alternate**: Team A plays full turn, then Team B plays
-- **Goal**: Be the first team to find all your words
-- **Use case**: Self-play training, competitive evaluation
-
-#### PettingZoo Interface (Multi-Agent Control)
-```python
-from codenames_rl.env.adversarial_pz import env as make_env
-
-env = make_env(wordlist_path="configs/wordlist_en.txt")
-env.reset(seed=42)
-
-# Control all 4 agents
-agents = {
-    'team_a_spymaster': LLMSpymaster(seed=42),
-    'team_a_guesser': LLMGuesser(seed=42),
-    'team_b_spymaster': EmbeddingsSpymaster(...),
-    'team_b_guesser': EmbeddingsGuesser(...),
-}
-
-for agent in env.agent_iter():
-    obs = env.observe(agent)
-    action = agents[agent].get_action(obs)
-    env.step(action)
-```
-
-#### Gymnasium Self-Play Interface (TRL Compatible)
-```python
-from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
-
-# Opponent uses frozen policies
-opponent_spy = EmbeddingsSpymaster(...)
-opponent_guess = EmbeddingsGuesser(...)
-
-env = CodenamesAdversarialGym(
-    wordlist_path="configs/wordlist_en.txt",
-    opponent_spymaster_policy=opponent_spy.get_clue,
-    opponent_guesser_policy=opponent_guess.get_guess
-)
-
-# TRL sees this as single-agent environment
-obs, info = env.reset(seed=42)
-
-# Your turn (Team A)
-action = your_agent.get_action(obs)
-obs, reward, done, truncated, info = env.step(action)
-# Opponent's turn executes automatically inside step()
-```
-
-**Training Progression**:
-1. Start with **cooperative mode** for initial training (simpler, faster)
-2. Move to **adversarial mode** for advanced training (self-play, competition)
-3. Use **self-play curriculum**: weak opponents → strong opponents → self
+See environment documentation for usage details.
 
 
 
 ## Evaluation
 
-### Frozen Benchmark
-- `splits/` (or `configs/`) contains **versioned** seeds and wordlists.
-- Strict separation:
-  - **train seeds**
-  - **eval seeds**
-  - **holdout seeds** (rare, for final comparison only)
-
-### Metrics Tracked
-- Win rate
-- Average score / game
-- Illegal clue rate
-- Assassin hit rate
-- Average game length
-- Performance vs baselines (A/B)
+**Metrics**: Win rate, avg score, assassin rate, illegal clues, game length, performance vs baselines.
 
 ### Running Evaluations
 
@@ -278,85 +178,12 @@ python scripts/run_eval_adversarial.py \
     --output results/llm_vs_embeddings.json
 ```
 
----
+## Testing
 
-## Testing (pytest + DeepEval)
-
-### Test Types
-- `tests/unit/`: rules and transitions (fast, deterministic)
-- `tests/property/`: invariants (Hypothesis recommended)
-- `tests/integration/`: LLM wrappers (parsing, schemas, error handling)
-- `tests/e2e/`: smoke tests over a few games (marked `slow`)
-- `tests/llm_quality/` (optional): DeepEval checks (format, constraints, rubrics)
-
-### Commands
 ```bash
-pytest -q
-pytest -q -m "not slow"
-pytest -q -m slow
+pytest -q              # All tests
+pytest -q -m "not slow"  # Skip LLM tests
 ```
-
----
-
-## Configuration
-
-Runs are driven by `configs/*.yaml` (model, quantization, hyperparams, seeds, reward shaping).  
-Each run logs:
-- git commit
-- full config
-- wordlist versions
-- evaluation metrics
-
----
-
-## Reproducibility
-
-- A run = (seed, config, wordlist_version, code_commit)
-- The environment is deterministic.
-- Evaluations always run on the same frozen seeds.
-
----
-
-## Prompt Formats
-
-### Spymaster Input
-```
-WORDS: apple, river, bank, knight, ...
-TEAM_WORDS: apple, knight, castle
-OPPONENT_WORDS: river, bank
-NEUTRAL_WORDS: cloud, paper, ...
-ASSASSIN: bomb
-REVEALED: [] 
-```
-
-### Spymaster Output
-```
-CLUE: fruit
-NUMBER: 2
-```
-
-### Guesser Input
-```
-WORDS: apple, river, bank, knight, ...
-REVEALED: [river (OPPONENT)]
-CLUE: fruit
-NUMBER: 2
-GUESSES_LEFT: 3
-```
-
-### Guesser Output
-```
-GUESS: apple
-```
-or
-```
-STOP
-```
-
-> The model outputs a structured response; **validation happens in code** (single word, not on board, allowed vocabulary, etc.). Invalid outputs incur penalties.
-
-
-
 
 
 ---
