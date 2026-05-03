@@ -52,7 +52,7 @@ st.markdown("""
 
 def init_game(wordlist_path: str, seed: int = None):
     """Initialize a new game.
-    
+
     Args:
         wordlist_path: Path to wordlist file
         seed: Random seed for game generation
@@ -60,6 +60,19 @@ def init_game(wordlist_path: str, seed: int = None):
     env = CodenamesEnv(str(wordlist_path))
     obs, _ = env.reset(seed=seed)
     return env, obs
+
+
+def start_new_game(seed: int | None = None) -> None:
+    """Reset session state to a fresh game, closing any previous env."""
+    previous = st.session_state.get("env")
+    if previous is not None:
+        try:
+            previous.close()
+        except Exception:
+            pass
+    wordlist_path, _ = get_language_paths(st.session_state.language)
+    st.session_state.env, st.session_state.obs = init_game(wordlist_path, seed=seed)
+    st.session_state.history = []
 
 
 def get_card_class(color: CardColor, revealed: bool) -> str:
@@ -77,10 +90,8 @@ def get_card_class(color: CardColor, revealed: bool) -> str:
 # Session state initialization
 if "env" not in st.session_state:
     st.session_state.language = "en"
-    wordlist_path, _ = get_language_paths(st.session_state.language)
-    st.session_state.env, st.session_state.obs = init_game(wordlist_path)
     st.session_state.show_colors = False
-    st.session_state.history = []
+    start_new_game()
 
 env = st.session_state.env
 obs = st.session_state.obs
@@ -92,9 +103,7 @@ st.markdown("# 🎯 Codenames")
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     if st.button("🔄 New Game", use_container_width=True):
-        wordlist_path, _ = get_language_paths(st.session_state.language)
-        st.session_state.env, st.session_state.obs = init_game(wordlist_path)
-        st.session_state.history = []
+        start_new_game()
         st.rerun()
 with col2:
     st.session_state.show_colors = st.toggle("👁 Spymaster View", st.session_state.show_colors)
@@ -104,16 +113,12 @@ with col3:
     new_language = st.selectbox("Language", language_options, index=current_index)
     if new_language != st.session_state.language:
         st.session_state.language = new_language
-        wordlist_path, _ = get_language_paths(st.session_state.language)
-        st.session_state.env, st.session_state.obs = init_game(wordlist_path)
-        st.session_state.history = []
+        start_new_game()
         st.rerun()
 with col4:
     seed = st.number_input("Seed", value=None, step=1, placeholder="Random")
     if st.button("Set Seed", use_container_width=True):
-        wordlist_path, _ = get_language_paths(st.session_state.language)
-        st.session_state.env, st.session_state.obs = init_game(wordlist_path, seed=int(seed) if seed else None)
-        st.session_state.history = []
+        start_new_game(seed=int(seed) if seed else None)
         st.rerun()
 
 # Phase banner
@@ -151,11 +156,18 @@ for row in range(5):
             # Clickable card during guesser turn
             if obs.phase == GamePhase.GUESSER_TURN and not revealed:
                 if st.button(word.upper(), key=f"card_{idx}", use_container_width=True):
-                    action = GuesserAction(word_index=idx)
-                    new_obs, reward, terminated, _, info = env.step(action)
-                    st.session_state.obs = new_obs
-                    st.session_state.history.append(f"Guessed: {word} → {info.get('color', 'unknown')}")
-                    st.rerun()
+                    try:
+                        new_obs, reward, terminated, _, info = env.step(
+                            GuesserAction(word_index=idx)
+                        )
+                    except Exception as exc:
+                        st.error(f"env.step failed: {exc}")
+                    else:
+                        st.session_state.obs = new_obs
+                        st.session_state.history.append(
+                            f"Guessed: {word} → {info.get('color', 'unknown')}"
+                        )
+                        st.rerun()
             else:
                 st.markdown(f'<div class="card {card_class}">{word}</div>', unsafe_allow_html=True)
 
@@ -172,23 +184,30 @@ if obs.phase == GamePhase.SPYMASTER_TURN:
         if st.button("Submit", use_container_width=True):
             if clue:
                 action = SpymasterAction(clue=clue.strip(), count=int(count))
-                new_obs, reward, terminated, _, info = env.step(action)
-                st.session_state.obs = new_obs
-                if "error" in info:
-                    st.error(info["error"])
+                try:
+                    new_obs, reward, terminated, _, info = env.step(action)
+                except Exception as exc:
+                    st.error(f"env.step failed: {exc}")
                 else:
-                    st.session_state.history.append(f"Clue: {clue} ({count})")
-                    st.rerun()
+                    st.session_state.obs = new_obs
+                    if "error" in info:
+                        st.error(info["error"])
+                    else:
+                        st.session_state.history.append(f"Clue: {clue} ({count})")
+                        st.rerun()
 
 # Pass button during guesser turn
 if obs.phase == GamePhase.GUESSER_TURN:
     st.markdown("---")
     if st.button("⏭ Pass Turn", use_container_width=True):
-        action = GuesserAction(word_index=None)
-        new_obs, _, _, _, _ = env.step(action)
-        st.session_state.obs = new_obs
-        st.session_state.history.append("Passed turn")
-        st.rerun()
+        try:
+            new_obs, _, _, _, _ = env.step(GuesserAction(word_index=None))
+        except Exception as exc:
+            st.error(f"env.step failed: {exc}")
+        else:
+            st.session_state.obs = new_obs
+            st.session_state.history.append("Passed turn")
+            st.rerun()
 
 # History sidebar
 with st.sidebar:

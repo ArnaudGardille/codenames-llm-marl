@@ -1,45 +1,49 @@
-"""Demo script showing TRL self-play training with adversarial Codenames.
+"""Demo of the adversarial self-play environment.
 
-This script demonstrates how to use the Gymnasium adversarial wrapper
-for TRL training with frozen opponent policies.
+⚠️  This file is a *demonstration*, not a training script. It shows how to
+plug a frozen opponent into ``CodenamesAdversarialGym`` and run a single
+episode with random Team-A actions. The TRL/GRPO integration is described in
+``explain_trl_integration()`` but is **not** implemented here.
+
+Real training (SFT → DPO → GRPO with LoRA) lives elsewhere; this file is
+intentionally a thin example so the env wiring stays easy to read.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
 from codenames_rl.agents.baselines import (
-    RandomSpymaster,
-    RandomGuesser,
-    EmbeddingsSpymaster,
     EmbeddingsGuesser,
+    EmbeddingsSpymaster,
+    RandomGuesser,
+    RandomSpymaster,
 )
+from codenames_rl.env.adversarial_gym import CodenamesAdversarialGym
+from codenames_rl.env.spaces import GamePhase
+from codenames_rl.utils.config import AGENT_SEED, get_language_paths
 
 
-def demo_self_play_episode():
+def demo_self_play_episode(lang: str = "en", seed: int = 123) -> None:
     """Demonstrate a single episode with self-play environment."""
     print("="*70)
-    print("Adversarial Self-Play Demo")
+    print("Adversarial Self-Play Demo (this is a wiring example, not training)")
     print("="*70)
     print("\nSetup:")
     print("- Team A: You control (demo uses random actions)")
-    print("- Team B: Opponent (baseline policies)")
+    print("- Team B: Opponent (Embeddings baseline)")
     print()
-    
-    # Configuration
-    wordlist_path = "configs/wordlist_en.txt"
-    vocabulary_path = "configs/vocabulary_en.txt"
-    
-    # Create opponent policies (Team B)
+
+    wordlist_path, vocabulary_path = get_language_paths(lang)
+
     print("Loading opponent policies...")
-    opponent_spy = EmbeddingsSpymaster(vocabulary_path, seed=42)
-    opponent_guess = EmbeddingsGuesser(seed=42)
+    opponent_spy = EmbeddingsSpymaster(vocabulary_path, seed=AGENT_SEED)
+    opponent_guess = EmbeddingsGuesser(seed=AGENT_SEED)
     print("✓ Opponent policies loaded (Embeddings baseline)")
-    
-    # Create environment
+
     print("\nCreating adversarial environment...")
     env = CodenamesAdversarialGym(
         wordlist_path=wordlist_path,
@@ -48,26 +52,25 @@ def demo_self_play_episode():
         render_mode="human"
     )
     print("✓ Environment created")
-    
-    # Run episode
+
     print("\n" + "="*70)
     print("Starting Episode")
     print("="*70)
-    
-    obs, info = env.reset(seed=123)
+
+    obs, info = env.reset(seed=seed)
     done = False
     step = 0
     max_steps = 50
-    
-    # Simple Team A policy (for demo - replace with trained model)
-    team_a_spy = RandomSpymaster(vocabulary_path, seed=42)
-    team_a_guess = RandomGuesser(seed=42)
-    
+
+    team_a_spy = RandomSpymaster(vocabulary_path, seed=AGENT_SEED)
+    team_a_guess = RandomGuesser(seed=AGENT_SEED)
+
     while not done and step < max_steps:
         print(f"\n--- Step {step + 1} ---")
-        
-        # Determine current role for Team A
-        if env.core.current_phase == 'spymaster':
+
+        # Phase comparison uses the GamePhase enum so we stay in sync with
+        # what the harness/app expect (`obs.phase == GamePhase.SPYMASTER_TURN`).
+        if obs.phase == GamePhase.SPYMASTER_TURN:
             print("Team A Spymaster's turn...")
             action = team_a_spy.get_clue(obs)
             print(f"Clue: {action.clue} ({action.count})")
@@ -78,24 +81,22 @@ def demo_self_play_episode():
                 print(f"Guessing: {obs.board_words[action.word_index]}")
             else:
                 print("Passing")
-        
-        # Execute action
+
         obs, reward, done, truncated, info = env.step(action)
-        
+
         print(f"Reward: {reward:.2f}")
         if done:
             print(f"\n{'='*70}")
-            print(f"Game Over!")
+            print("Game Over!")
             print(f"Result: {info.get('result', 'unknown')}")
             print(f"Total Episode Reward: {info.get('episode_reward', 0):.2f}")
             print(f"{'='*70}")
-        
-        # Render current state
-        if step % 5 == 0:  # Render every 5 steps
+
+        if step % 5 == 0:
             env.render()
-        
+
         step += 1
-    
+
     env.close()
     print("\n✓ Demo completed")
 
@@ -171,16 +172,22 @@ Note: The environment handles all opponent actions automatically,
 
 if __name__ == "__main__":
     print("Codenames Adversarial Self-Play Training Demo\n")
-    
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lang", choices=["en", "fr"], default="en")
+    parser.add_argument("--seed", type=int, default=123, help="Episode seed")
+    parser.add_argument("--no-trl-guide", action="store_true",
+                        help="Skip the TRL integration explainer at the end")
+    args = parser.parse_args()
+
     try:
-        demo_self_play_episode()
-        explain_trl_integration()
-        
+        demo_self_play_episode(lang=args.lang, seed=args.seed)
+        if not args.no_trl_guide:
+            explain_trl_integration()
+
     except FileNotFoundError as e:
         print(f"\n❌ Error: {e}")
-        print("\nMake sure wordlist and vocabulary files exist:")
-        print("  - configs/wordlist_en.txt")
-        print("  - configs/vocabulary_en.txt")
+        print("\nMake sure the language wordlists exist under configs/.")
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
