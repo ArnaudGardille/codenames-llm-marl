@@ -80,7 +80,6 @@ if "/" in _embedding_model_raw:
     EMBEDDING_MODEL = _embedding_model_raw
 else:
     EMBEDDING_MODEL = f"sentence-transformers/{_embedding_model_raw}"
-LLM_MODEL_PATH = os.getenv("LLM_MODEL_PATH", "")
 
 # LLM Model Configuration
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
@@ -90,5 +89,4 @@ LLM_QUANTIZATION = os.getenv("LLM_QUANTIZATION", "none")
 
 # Performance Settings
 DEVICE = os.getenv("DEVICE", "cpu")
-EMBEDDING_BATCH_SIZE = _get("EMBEDDING_BATCH_SIZE", 32, int)
 

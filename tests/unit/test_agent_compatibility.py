@@ -3,11 +3,6 @@
 import pytest
 
 from codenames_rl.agents import (
-    AdaptiveGuesser,
-    ClusterSpymaster,
-    ContextualGuesser,
-    CrossEncoderGuesser,
-    CrossEncoderSpymaster,
     EmbeddingsGuesser,
     EmbeddingsSpymaster,
     LLMGuesser,
@@ -35,12 +30,7 @@ class TestAgentImports:
         assert RandomGuesser is not None
         assert EmbeddingsSpymaster is not None
         assert EmbeddingsGuesser is not None
-        assert ClusterSpymaster is not None
-        assert ContextualGuesser is not None
-        assert AdaptiveGuesser is not None
-        assert CrossEncoderSpymaster is not None
-        assert CrossEncoderGuesser is not None
-        
+
         if HAS_TORCH:
             assert LLMSpymaster is not None
             assert LLMGuesser is not None
@@ -66,36 +56,6 @@ class TestAgentInstantiation:
         
         assert spymaster is not None
         assert guesser is not None
-
-    def test_improved_agents_instantiate(self, temp_vocabulary):
-        """Test Improved agents can be instantiated."""
-        spymaster = ClusterSpymaster(vocabulary_path=temp_vocabulary, seed=42)
-        guesser1 = ContextualGuesser(seed=42)
-        guesser2 = AdaptiveGuesser(seed=42)
-        
-        assert spymaster is not None
-        assert guesser1 is not None
-        assert guesser2 is not None
-
-    @pytest.mark.slow
-    def test_cross_encoder_agents_instantiate(self, temp_vocabulary):
-        """Test Cross-Encoder agents can be instantiated."""
-        try:
-            spymaster = CrossEncoderSpymaster(
-                vocabulary_path=temp_vocabulary,
-                seed=42,
-                top_k_retrieve=5,  # Small for testing
-                top_k_candidates=20  # Small for testing
-            )
-            guesser = CrossEncoderGuesser(
-                seed=42,
-                top_k_retrieve=5  # Small for testing
-            )
-            
-            assert spymaster is not None
-            assert guesser is not None
-        except Exception as e:
-            pytest.skip(f"Cross-Encoder models not available: {e}")
 
     @pytest.mark.skipif(not HAS_TORCH, reason="torch and transformers not available")
     @pytest.mark.slow
@@ -277,56 +237,4 @@ class TestNoRegressions:
         
         action = agent.get_guess(obs)
         assert action.word_index is None or isinstance(action.word_index, int)
-
-    @pytest.mark.slow
-    def test_cross_encoder_spymaster_works(self, temp_vocabulary):
-        """Test CrossEncoderSpymaster works correctly."""
-        from codenames_rl.env.spaces import CardColor, GamePhase, Observation
-        
-        agent = CrossEncoderSpymaster(
-            vocabulary_path=temp_vocabulary,
-            seed=42,
-            top_k_retrieve=5,
-            top_k_candidates=20
-        )
-        obs = Observation(
-            board_words=["car", "book"] * 12 + ["assassin"],
-            revealed_mask=[False] * 25,
-            board_colors=[CardColor.TEAM] * 9 + [CardColor.OPPONENT] * 8 + 
-                        [CardColor.NEUTRAL] * 7 + [CardColor.ASSASSIN],
-            current_clue=None,
-            current_count=None,
-            remaining_guesses=0,
-            phase=GamePhase.SPYMASTER_TURN,
-            team_remaining=9,
-            opponent_remaining=8
-        )
-        
-        action = agent.get_clue(obs)
-        assert action.clue is not None
-        assert action.count > 0
-        assert action.clue not in obs.board_words
-
-    @pytest.mark.slow
-    def test_cross_encoder_guesser_works(self):
-        """Test CrossEncoderGuesser works correctly."""
-        from codenames_rl.env.spaces import CardColor, GamePhase, Observation
-        
-        agent = CrossEncoderGuesser(seed=42, top_k_retrieve=5)
-        obs = Observation(
-            board_words=["car", "book"] * 12 + ["assassin"],
-            revealed_mask=[False] * 25,
-            board_colors=[CardColor.TEAM] * 9 + [CardColor.OPPONENT] * 8 + 
-                        [CardColor.NEUTRAL] * 7 + [CardColor.ASSASSIN],
-            current_clue="furniture",
-            current_count=3,
-            remaining_guesses=3,
-            phase=GamePhase.GUESSER_TURN,
-            team_remaining=9,
-            opponent_remaining=8
-        )
-        
-        action = agent.get_guess(obs)
-        assert action.word_index is None or isinstance(action.word_index, int)
-
 
