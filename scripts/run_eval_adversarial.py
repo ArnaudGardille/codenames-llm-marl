@@ -10,16 +10,7 @@ import argparse
 import json
 from pathlib import Path
 
-from codenames_rl.agents import (
-    EmbeddingsGuesser,
-    EmbeddingsSpymaster,
-    LLMGuesser,
-    LLMSpymaster,
-    QwenEmbeddingGuesser,
-    QwenEmbeddingSpymaster,
-    RandomGuesser,
-    RandomSpymaster,
-)
+from codenames_rl.agents import create_agent
 from codenames_rl.utils.config import (
     NUM_GAMES,
     START_SEED,
@@ -27,43 +18,6 @@ from codenames_rl.utils.config import (
     WORDLIST_PATH,
     VOCABULARY_PATH,
 )
-
-
-def create_agent(agent_type: str, vocabulary_path: str = None, seed: int = None):
-    """Create an agent based on type string.
-    
-    Args:
-        agent_type: One of "random", "embeddings", "qwen_embedding", "llm"
-        vocabulary_path: Path to vocabulary file (for spymasters)
-        seed: Random seed
-        
-    Returns:
-        Agent instance
-    """
-    if agent_type == "random_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for random spymaster")
-        return RandomSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "embeddings_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for embeddings spymaster")
-        return EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "qwen_embedding_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for qwen_embedding spymaster")
-        return QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "llm_spymaster":
-        return LLMSpymaster(seed=seed)
-    elif agent_type == "random_guesser":
-        return RandomGuesser(seed=seed)
-    elif agent_type == "embeddings_guesser":
-        return EmbeddingsGuesser(seed=seed)
-    elif agent_type == "qwen_embedding_guesser":
-        return QwenEmbeddingGuesser(seed=seed)
-    elif agent_type == "llm_guesser":
-        return LLMGuesser(seed=seed)
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
 
 
 def run_adversarial_game(

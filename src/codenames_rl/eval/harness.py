@@ -186,133 +186,63 @@ class EvaluationHarness:
             cards_per_turn=cards_per_turn
         )
 
-    def evaluate(
-        self,
-        num_games: int,
-        seeds: Optional[List[int]] = None,
-        start_seed: int = 0
-    ) -> EvaluationMetrics:
-        """Evaluate agents over multiple games.
-        
-        Args:
-            num_games: Number of games to run
-            seeds: Optional list of specific seeds to use
-            start_seed: Starting seed if seeds not provided
-            
-        Returns:
-            EvaluationMetrics with aggregated statistics
-        """
-        if seeds is None:
-            seeds = list(range(start_seed, start_seed + num_games))
-        elif len(seeds) != num_games:
-            raise ValueError(f"Number of seeds ({len(seeds)}) must match num_games ({num_games})")
-        
-        results = []
-        
-        # Use tqdm for progress bar (disable if verbose mode is on)
-        progress_bar = tqdm(
-            enumerate(seeds),
-            total=num_games,
-            desc="Evaluating",
-            disable=self.verbose,
-            unit="game"
-        )
-        
-        for i, seed in progress_bar:
-            if self.verbose:
-                print(f"\n{'='*60}")
-                print(f"Game {i+1}/{num_games} (seed={seed})")
-                print(f"{'='*60}")
-            
-            result = self.run_episode(seed)
-            results.append(result)
-            
-            # Update progress bar with current stats
-            if not self.verbose:
-                current_metrics = compute_metrics(results)
-                progress_bar.set_postfix({
-                    'win_rate': f'{current_metrics.win_rate:.1%}',
-                    'avg_score': f'{current_metrics.avg_score:.1f}'
-                })
-            
-            if self.verbose:
-                print(f"\nResult: {result.outcome}")
-                print(f"Score: {result.score}/9")
-                print(f"Turns: {result.total_turns}")
-        
-        metrics = compute_metrics(results)
-        
-        if self.verbose:
-            print(f"\n{'='*60}")
-            print("EVALUATION COMPLETE")
-            print(f"{'='*60}")
-            print(metrics)
-        
-        return metrics
-
     def evaluate_with_details(
         self,
         num_games: int,
         seeds: Optional[List[int]] = None,
         start_seed: int = 0
     ) -> tuple[EvaluationMetrics, List[GameResult]]:
-        """Evaluate agents and return both metrics and detailed results.
-        
-        Args:
-            num_games: Number of games to run
-            seeds: Optional list of specific seeds to use
-            start_seed: Starting seed if seeds not provided
-            
-        Returns:
-            Tuple of (EvaluationMetrics, List[GameResult])
+        """Evaluate agents over multiple games.
+
+        Returns aggregated metrics together with the per-game results.
         """
         if seeds is None:
             seeds = list(range(start_seed, start_seed + num_games))
         elif len(seeds) != num_games:
             raise ValueError(f"Number of seeds ({len(seeds)}) must match num_games ({num_games})")
-        
-        results = []
-        
-        # Use tqdm for progress bar (disable if verbose mode is on)
+
+        results: List[GameResult] = []
         progress_bar = tqdm(
             enumerate(seeds),
             total=num_games,
             desc="Evaluating",
             disable=self.verbose,
-            unit="game"
+            unit="game",
         )
-        
+
         for i, seed in progress_bar:
             if self.verbose:
-                print(f"\n{'='*60}")
-                print(f"Game {i+1}/{num_games} (seed={seed})")
-                print(f"{'='*60}")
-            
+                print(f"\n{'='*60}\nGame {i+1}/{num_games} (seed={seed})\n{'='*60}")
+
             result = self.run_episode(seed)
             results.append(result)
-            
-            # Update progress bar with current stats
+
             if not self.verbose:
-                current_metrics = compute_metrics(results)
+                current = compute_metrics(results)
                 progress_bar.set_postfix({
-                    'win_rate': f'{current_metrics.win_rate:.1%}',
-                    'avg_score': f'{current_metrics.avg_score:.1f}'
+                    "win_rate": f"{current.win_rate:.1%}",
+                    "avg_score": f"{current.avg_score:.1f}",
                 })
-            
-            if self.verbose:
-                print(f"\nResult: {result.outcome}")
-                print(f"Score: {result.score}/9")
-                print(f"Turns: {result.total_turns}")
-        
+            else:
+                print(f"\nResult: {result.outcome}\nScore: {result.score}/9\nTurns: {result.total_turns}")
+
         metrics = compute_metrics(results)
-        
+
         if self.verbose:
-            print(f"\n{'='*60}")
-            print("EVALUATION COMPLETE")
-            print(f"{'='*60}")
+            print(f"\n{'='*60}\nEVALUATION COMPLETE\n{'='*60}")
             print(metrics)
-        
+
         return metrics, results
+
+    def evaluate(
+        self,
+        num_games: int,
+        seeds: Optional[List[int]] = None,
+        start_seed: int = 0,
+    ) -> EvaluationMetrics:
+        """Evaluate agents and return only the aggregated metrics."""
+        metrics, _ = self.evaluate_with_details(num_games, seeds, start_seed)
+        return metrics
 
 
 def compare_agents(

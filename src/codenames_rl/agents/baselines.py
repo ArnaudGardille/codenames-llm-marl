@@ -46,6 +46,89 @@ except ImportError:
     HAS_BITSANDBYTES = False
 
 
+def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Cosine similarity between a vector and a matrix of row-vectors."""
+    vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
+    matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
+    return np.dot(matrix_norm, vec_norm)
+
+
+def _resolve_device(device: Optional[str], model: Optional[object] = None) -> str:
+    """Resolve target device.
+
+    Priority: explicit ``device`` arg > device of a shared ``model`` >
+    config ``DEVICE`` > auto-detect (cuda → mps → cpu).
+    """
+    if device is not None:
+        return device
+    if model is not None:
+        model_device = getattr(model, "device", None)
+        if model_device is not None:
+            return str(model_device)
+        try:
+            first_param = next(model.parameters(), None)
+            if first_param is not None:
+                return str(first_param.device)
+        except Exception:
+            pass
+        return "cpu"
+    if DEVICE and DEVICE != "cpu":
+        return DEVICE
+    if HAS_TORCH:
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    return "cpu"
+
+
+def _build_quantization_config(quantization: str, device: str):
+    """Return a ``BitsAndBytesConfig`` for 4bit/8bit, or ``None`` for no quantization.
+
+    Raises ``ValueError`` if the requested mode is unsupported on the target device.
+    """
+    q = (quantization or "none").lower().replace("-", "")
+    if q in ("none", ""):
+        return None
+    if q not in ("4bit", "8bit"):
+        raise ValueError(f"Unknown quantization mode: {quantization!r}")
+    if not HAS_BITSANDBYTES:
+        raise ValueError(
+            f"{q} quantization requires bitsandbytes (pip install bitsandbytes)"
+        )
+    if device != "cuda":
+        raise ValueError(
+            f"{q} quantization requires CUDA, got device={device!r}. "
+            "On Apple Silicon (MPS), use float16 or a smaller model."
+        )
+    if q == "4bit":
+        return BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+    return BitsAndBytesConfig(load_in_8bit=True)
+
+
+def _load_causal_lm(model_name: str, device: str, quantization_config) -> "AutoModelForCausalLM":
+    """Load an HF causal LM with the right dtype/device for the target.
+
+    When ``quantization_config`` is given, it controls dtype and device-map.
+    Otherwise we use float16 on cuda/mps and float32 on cpu.
+    """
+    kwargs = {"trust_remote_code": True}
+    if quantization_config is not None:
+        kwargs["quantization_config"] = quantization_config
+        kwargs["device_map"] = "auto"
+    else:
+        kwargs["device_map"] = device
+        kwargs["dtype"] = torch.float16 if device in ("cuda", "mps") else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
+    model.eval()
+    return model
+
+
 class BaseSpymaster(ABC):
     """Abstract base class for Spymaster agents."""
 
@@ -201,136 +284,94 @@ class EmbeddingsSpymaster(BaseSpymaster):
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k
         self.rng = np.random.default_rng(seed)
-        
-        # Load model
-        self.model = SentenceTransformer(model_name)
+
+        self._init_encoder(model_name)
         self.vocabulary = self._load_vocabulary()
+
+    def _init_encoder(self, model_name: str) -> None:
+        """Load the encoder. Subclasses override to use a different model class."""
+        self.model = SentenceTransformer(model_name)
+
+    def _encode(self, texts: List[str]) -> np.ndarray:
+        """Encode a list of strings into a numpy array of embeddings."""
+        return self.model.encode(texts, convert_to_numpy=True)
 
     def _load_vocabulary(self) -> List[str]:
         """Load vocabulary from file."""
         path = Path(self.vocabulary_path)
         if not path.exists():
             raise FileNotFoundError(f"Vocabulary file not found: {self.vocabulary_path}")
-        
+
         with open(path, 'r', encoding='utf-8') as f:
             words = [line.strip().lower() for line in f if line.strip()]
-        
+
         return words
 
     def get_clue(self, obs: Observation) -> SpymasterAction:
         """Generate clue using embedding-based scoring."""
         from ..env.spaces import CardColor
-        
-        # Separate board words by color
-        team_words = []
-        opponent_words = []
-        neutral_words = []
-        assassin_words = []
-        
-        for i, (word, color, revealed) in enumerate(
-            zip(obs.board_words, obs.board_colors, obs.revealed_mask)
-        ):
+
+        team_words, opponent_words, neutral_words, assassin_words = [], [], [], []
+        for word, color, revealed in zip(obs.board_words, obs.board_colors, obs.revealed_mask):
             if revealed:
                 continue
-            if color == CardColor.TEAM:
-                team_words.append(word.lower())
-            elif color == CardColor.OPPONENT:
-                opponent_words.append(word.lower())
-            elif color == CardColor.NEUTRAL:
-                neutral_words.append(word.lower())
-            elif color == CardColor.ASSASSIN:
-                assassin_words.append(word.lower())
-        
+            bucket = {
+                CardColor.TEAM: team_words,
+                CardColor.OPPONENT: opponent_words,
+                CardColor.NEUTRAL: neutral_words,
+                CardColor.ASSASSIN: assassin_words,
+            }.get(color)
+            if bucket is not None:
+                bucket.append(word.lower())
+
         if not team_words:
-            # No team words left (shouldn't happen, but safety)
             return SpymasterAction(clue="pass", count=0)
-        
-        # Filter vocabulary to exclude board words
+
         board_lower = [w.lower() for w in obs.board_words]
         candidates = [w for w in self.vocabulary if w not in board_lower]
-        
-        # Sample candidates if too many
+
         if len(candidates) > self.top_k:
             candidates = self.rng.choice(candidates, size=self.top_k, replace=False).tolist()
-        
-        # Encode everything
-        candidate_embs = self.model.encode(candidates, convert_to_numpy=True)
-        team_embs = self.model.encode(team_words, convert_to_numpy=True)
-        
-        opponent_embs = (
-            self.model.encode(opponent_words, convert_to_numpy=True)
-            if opponent_words else None
-        )
-        neutral_embs = (
-            self.model.encode(neutral_words, convert_to_numpy=True)
-            if neutral_words else None
-        )
-        assassin_embs = (
-            self.model.encode(assassin_words, convert_to_numpy=True)
-            if assassin_words else None
-        )
-        
-        # Score each candidate
+
+        candidate_embs = self._encode(candidates)
+        team_embs = self._encode(team_words)
+        opponent_embs = self._encode(opponent_words) if opponent_words else None
+        neutral_embs = self._encode(neutral_words) if neutral_words else None
+        assassin_embs = self._encode(assassin_words) if assassin_words else None
+
         best_score = float('-inf')
         best_clue = None
         best_count = 1
-        
-        for i, (candidate, cand_emb) in enumerate(zip(candidates, candidate_embs)):
-            # Validate clue
+
+        for candidate, cand_emb in zip(candidates, candidate_embs):
             is_valid, _ = is_valid_clue(candidate, obs.board_words)
             if not is_valid:
                 continue
-            
-            # Compute similarities
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
-            team_mean = np.mean(team_sims)
-            
-            # Penalties
-            assassin_penalty = 0.0
+
+            team_sims = _cosine_similarity(cand_emb, team_embs)
+            score = np.mean(team_sims)
             if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
-                assassin_penalty = self.alpha * np.max(assassin_sims)
-            
-            opponent_penalty = 0.0
+                score -= self.alpha * np.max(_cosine_similarity(cand_emb, assassin_embs))
             if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
-                opponent_penalty = self.beta * np.max(opponent_sims)
-            
-            neutral_penalty = 0.0
+                score -= self.beta * np.max(_cosine_similarity(cand_emb, opponent_embs))
             if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
-                neutral_penalty = self.gamma * np.mean(neutral_sims)
-            
-            # Final score
-            score = team_mean - assassin_penalty - opponent_penalty - neutral_penalty
-            
+                score -= self.gamma * np.mean(_cosine_similarity(cand_emb, neutral_embs))
+
             if score > best_score:
                 best_score = score
                 best_clue = candidate
-                # Count: how many team words have similarity above threshold
                 best_count = max(1, int(np.sum(team_sims >= self.similarity_threshold)))
-        
+
         if best_clue is None:
-            # Fallback: pick first valid word
             for word in candidates[:20]:
-                is_valid, _ = is_valid_clue(word, obs.board_words)
-                if is_valid:
+                if is_valid_clue(word, obs.board_words)[0]:
                     best_clue = word
-                    best_count = 1
                     break
-            
             if best_clue is None:
                 best_clue = "thing"
-                best_count = 1
-        
-        return SpymasterAction(clue=best_clue, count=best_count)
+            best_count = 1
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
+        return SpymasterAction(clue=best_clue, count=best_count)
 
 
 class EmbeddingsGuesser(BaseGuesser):
@@ -351,488 +392,125 @@ class EmbeddingsGuesser(BaseGuesser):
         """
         self.confidence_threshold = confidence_threshold
         self.rng = np.random.default_rng(seed)
-        
-        # Load model
+        self._init_encoder(model_name)
+
+    def _init_encoder(self, model_name: str) -> None:
+        """Load the encoder. Subclasses override to use a different model class."""
         self.model = SentenceTransformer(model_name)
 
+    def _encode(self, texts: List[str]) -> np.ndarray:
+        """Encode a list of strings into a numpy array of embeddings."""
+        return self.model.encode(texts, convert_to_numpy=True)
+
     def get_guess(self, obs: Observation) -> GuesserAction:
-        """Make a guess by ranking unrevealed words by clue similarity."""
+        """Pick the unrevealed word most similar to the clue, or STOP below threshold."""
         if obs.current_clue is None:
-            # No active clue (shouldn't happen during guesser turn)
             return GuesserAction(word_index=None)
-        
-        # Find unrevealed words
-        unrevealed_indices = [
-            i for i, revealed in enumerate(obs.revealed_mask) if not revealed
-        ]
-        
+
+        unrevealed_indices = [i for i, r in enumerate(obs.revealed_mask) if not r]
         if not unrevealed_indices:
             return GuesserAction(word_index=None)
-        
+
         unrevealed_words = [obs.board_words[i].lower() for i in unrevealed_indices]
-        
-        # Encode clue and words
-        clue_emb = self.model.encode([obs.current_clue.lower()], convert_to_numpy=True)[0]
-        word_embs = self.model.encode(unrevealed_words, convert_to_numpy=True)
-        
-        # Compute similarities
-        similarities = self._cosine_similarity(clue_emb, word_embs)
-        
-        # Get best match
-        best_idx = np.argmax(similarities)
-        best_sim = similarities[best_idx]
-        
-        # Decide: guess or pass
-        if best_sim >= self.confidence_threshold:
+        clue_emb = self._encode([obs.current_clue.lower()])[0]
+        word_embs = self._encode(unrevealed_words)
+        similarities = _cosine_similarity(clue_emb, word_embs)
+
+        best_idx = int(np.argmax(similarities))
+        if similarities[best_idx] >= self.confidence_threshold:
             return GuesserAction(word_index=unrevealed_indices[best_idx])
-        else:
-            return GuesserAction(word_index=None)  # STOP
-
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
+        return GuesserAction(word_index=None)
 
 
-class QwenEmbeddingSpymaster(BaseSpymaster):
-    """Spymaster using Qwen3-Embedding-8B for better semantic understanding.
-    
-    Uses a large embedding model (8B parameters) that provides better semantic
-    understanding than small sentence-transformers models, while being faster
-    and more efficient than full LLMs.
-    
-    Scoring formula:
-        score(clue) = mean_sim(clue, team_words) 
-                      - alpha * max_sim(clue, assassin)
-                      - beta * max_sim(clue, opponent_words)
-                      - gamma * mean_sim(clue, neutral_words)
+class _QwenEncoderMixin:
+    """Encoder hook used by both Qwen embedding agents.
+
+    Subclasses must set ``self.device`` before ``_init_encoder`` runs.
     """
+
+    _QWEN_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
+    def _init_encoder(self, model_name: str) -> None:
+        from transformers import AutoModel, AutoTokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        dtype = torch.float16 if self.device in ("cuda", "mps") else torch.float32
+        self.model = AutoModel.from_pretrained(
+            model_name, torch_dtype=dtype, device_map=self.device
+        )
+        self.model.eval()
+
+    def _encode(self, texts: List[str]) -> np.ndarray:
+        formatted = [f"{self._QWEN_INSTRUCTION}{t}" for t in texts]
+        inputs = self.tokenizer(
+            formatted, padding=True, truncation=True, return_tensors="pt", max_length=512
+        ).to(self.device)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+                emb = outputs.pooler_output
+            else:
+                emb = outputs.last_hidden_state.mean(dim=1)
+        emb = emb.cpu().numpy()
+        return emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
+
+
+class QwenEmbeddingSpymaster(_QwenEncoderMixin, EmbeddingsSpymaster):
+    """Spymaster scored with Qwen3-Embedding-8B, same formula as EmbeddingsSpymaster."""
 
     def __init__(
         self,
         vocabulary_path: str,
         model_name: str = "Qwen/Qwen3-Embedding-8B",
-        alpha: float = 3.0,  # Assassin penalty
-        beta: float = 1.5,   # Opponent penalty
-        gamma: float = 0.3,  # Neutral penalty
-        similarity_threshold: float = 0.3,  # Min similarity to count toward clue number
-        top_k: int = 100,    # Number of top candidates to consider
+        alpha: float = 3.0,
+        beta: float = 1.5,
+        gamma: float = 0.3,
+        similarity_threshold: float = 0.3,
+        top_k: int = 100,
         device: Optional[str] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
     ):
-        """Initialize Qwen embedding-based spymaster.
-        
-        Args:
-            vocabulary_path: Path to vocabulary file
-            model_name: HuggingFace model identifier for Qwen embedding model
-            alpha: Penalty weight for assassin similarity
-            beta: Penalty weight for opponent similarity
-            gamma: Penalty weight for neutral similarity
-            similarity_threshold: Minimum similarity to include in count
-            top_k: Number of candidates to evaluate
-            device: Device to load model on (auto-detects if None)
-            seed: Random seed for tie-breaking
-            
-        Raises:
-            ImportError: If torch or transformers are not installed
-        """
         if not HAS_TORCH:
             raise ImportError(
-                "Qwen embedding agents require torch and transformers. "
-                "Install them with: pip install torch transformers"
+                "Qwen embedding agents require torch and transformers."
             )
-        
-        self.vocabulary_path = vocabulary_path
-        self.model_name = model_name
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
-        self.similarity_threshold = similarity_threshold
-        self.top_k = top_k
-        self.rng = np.random.default_rng(seed)
-        
-        # Auto-detect device
-        if device is None:
-            if DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-        
-        # Load model and tokenizer
-        from transformers import AutoModel, AutoTokenizer
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        # Determine dtype based on device
-        if self.device == "cuda":
-            dtype = torch.float16
-        elif self.device == "mps":
-            dtype = torch.float16  # Use FP16 to reduce memory usage
-        else:
-            dtype = torch.float32
-        
-        self.model = AutoModel.from_pretrained(
-            model_name,
-            torch_dtype=dtype,
-            device_map=self.device
+        self.device = _resolve_device(device)
+        super().__init__(
+            vocabulary_path=vocabulary_path,
+            model_name=model_name,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+            similarity_threshold=similarity_threshold,
+            top_k=top_k,
+            seed=seed,
         )
-        self.model.eval()
-        
-        self.vocabulary = self._load_vocabulary()
-
-    def _load_vocabulary(self) -> List[str]:
-        """Load vocabulary from file."""
-        path = Path(self.vocabulary_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Vocabulary file not found: {self.vocabulary_path}")
-        
-        with open(path, 'r', encoding='utf-8') as f:
-            words = [line.strip().lower() for line in f if line.strip()]
-        
-        return words
-
-    def _encode(self, texts: List[str]) -> np.ndarray:
-        """Encode texts using Qwen3-Embedding model.
-        
-        Qwen3-Embedding models use instruction-aware inputs. We format
-        the input with an instruction prefix for better embeddings.
-        
-        Args:
-            texts: List of text strings to encode
-            
-        Returns:
-            numpy array of embeddings (shape: [len(texts), embedding_dim])
-        """
-        # Qwen3-Embedding uses instruction-aware format
-        # Format: "Represent this sentence for searching relevant passages: {text}"
-        instruction = "Represent this sentence for searching relevant passages: "
-        formatted_texts = [f"{instruction}{text}" for text in texts]
-        
-        # Tokenize and encode
-        inputs = self.tokenizer(
-            formatted_texts,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512
-        ).to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Extract embeddings from last hidden state
-            # For Qwen3-Embedding, we typically use mean pooling or the [CLS] token
-            # Check if model has pooler_output, otherwise use mean pooling
-            if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-                embeddings = outputs.pooler_output
-            else:
-                # Mean pooling over sequence length
-                embeddings = outputs.last_hidden_state.mean(dim=1)
-        
-        # Convert to numpy and normalize
-        embeddings = embeddings.cpu().numpy()
-        # L2 normalize for cosine similarity
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings = embeddings / (norms + 1e-8)
-        
-        return embeddings
-
-    def get_clue(self, obs: Observation) -> SpymasterAction:
-        """Generate clue using Qwen embedding-based scoring."""
-        from ..env.spaces import CardColor
-        
-        # Separate board words by color
-        team_words = []
-        opponent_words = []
-        neutral_words = []
-        assassin_words = []
-        
-        for i, (word, color, revealed) in enumerate(
-            zip(obs.board_words, obs.board_colors, obs.revealed_mask)
-        ):
-            if revealed:
-                continue
-            if color == CardColor.TEAM:
-                team_words.append(word.lower())
-            elif color == CardColor.OPPONENT:
-                opponent_words.append(word.lower())
-            elif color == CardColor.NEUTRAL:
-                neutral_words.append(word.lower())
-            elif color == CardColor.ASSASSIN:
-                assassin_words.append(word.lower())
-        
-        if not team_words:
-            # No team words left (shouldn't happen, but safety)
-            return SpymasterAction(clue="pass", count=0)
-        
-        # Filter vocabulary to exclude board words
-        board_lower = [w.lower() for w in obs.board_words]
-        candidates = [w for w in self.vocabulary if w not in board_lower]
-        
-        # Sample candidates if too many
-        if len(candidates) > self.top_k:
-            candidates = self.rng.choice(candidates, size=self.top_k, replace=False).tolist()
-        
-        # Encode everything
-        candidate_embs = self._encode(candidates)
-        team_embs = self._encode(team_words)
-        
-        opponent_embs = (
-            self._encode(opponent_words)
-            if opponent_words else None
-        )
-        neutral_embs = (
-            self._encode(neutral_words)
-            if neutral_words else None
-        )
-        assassin_embs = (
-            self._encode(assassin_words)
-            if assassin_words else None
-        )
-        
-        # Score each candidate
-        best_score = float('-inf')
-        best_clue = None
-        best_count = 1
-        
-        for i, (candidate, cand_emb) in enumerate(zip(candidates, candidate_embs)):
-            # Validate clue
-            is_valid, _ = is_valid_clue(candidate, obs.board_words)
-            if not is_valid:
-                continue
-            
-            # Compute similarities
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
-            team_mean = np.mean(team_sims)
-            
-            # Penalties
-            assassin_penalty = 0.0
-            if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
-                assassin_penalty = self.alpha * np.max(assassin_sims)
-            
-            opponent_penalty = 0.0
-            if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
-                opponent_penalty = self.beta * np.max(opponent_sims)
-            
-            neutral_penalty = 0.0
-            if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
-                neutral_penalty = self.gamma * np.mean(neutral_sims)
-            
-            # Final score
-            score = team_mean - assassin_penalty - opponent_penalty - neutral_penalty
-            
-            if score > best_score:
-                best_score = score
-                best_clue = candidate
-                # Count: how many team words have similarity above threshold
-                best_count = max(1, int(np.sum(team_sims >= self.similarity_threshold)))
-        
-        if best_clue is None:
-            # Fallback: pick first valid word
-            for word in candidates[:20]:
-                is_valid, _ = is_valid_clue(word, obs.board_words)
-                if is_valid:
-                    best_clue = word
-                    best_count = 1
-                    break
-            
-            if best_clue is None:
-                best_clue = "thing"
-                best_count = 1
-        
-        return SpymasterAction(clue=best_clue, count=best_count)
-
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
-class QwenEmbeddingGuesser(BaseGuesser):
-    """Guesser using Qwen3-Embedding-8B to rank words by similarity to clue."""
+class QwenEmbeddingGuesser(_QwenEncoderMixin, EmbeddingsGuesser):
+    """Guesser scored with Qwen3-Embedding-8B; can share model with the spymaster."""
 
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-Embedding-8B",
         model: Optional[object] = None,
         tokenizer: Optional[object] = None,
-        confidence_threshold: float = 0.25,  # Min similarity to guess
+        confidence_threshold: float = 0.25,
         device: Optional[str] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
     ):
-        """Initialize Qwen embedding-based guesser.
-        
-        Args:
-            model_name: HuggingFace model identifier (defaults to Qwen/Qwen3-Embedding-8B)
-            model: Pre-loaded model (optional, for sharing with spymaster)
-            tokenizer: Pre-loaded tokenizer (optional)
-            confidence_threshold: Minimum similarity to make a guess (else STOP)
-            device: Device to load model on (auto-detects if None, or uses model's device)
-            seed: Random seed for tie-breaking
-            
-        Raises:
-            ImportError: If torch or transformers are not installed
-        """
         if not HAS_TORCH:
             raise ImportError(
-                "Qwen embedding agents require torch and transformers. "
-                "Install them with: pip install torch transformers"
+                "Qwen embedding agents require torch and transformers."
             )
-        
         self.confidence_threshold = confidence_threshold
         self.rng = np.random.default_rng(seed)
-        
-        # Use provided model/tokenizer or load new ones
         if model is not None and tokenizer is not None:
             self.model = model
             self.tokenizer = tokenizer
-            # Use device from parameter, or try to get from model, or default to cpu
-            if device is not None:
-                self.device = device
-            else:
-                # Try to get device from model
-                model_device = getattr(model, "device", None)
-                if model_device is not None:
-                    if isinstance(model_device, torch.device):
-                        self.device = str(model_device)
-                    else:
-                        self.device = model_device
-                else:
-                    # Try to get device from first parameter
-                    try:
-                        first_param = next(model.parameters(), None)
-                        if first_param is not None:
-                            self.device = str(first_param.device)
-                        else:
-                            self.device = "cpu"
-                    except:
-                        self.device = "cpu"
+            self.device = _resolve_device(device, model)
         else:
-            self.model_name = model_name
-            
-            # Auto-detect device
-            if device is None:
-                if DEVICE != "cpu":
-                    self.device = DEVICE
-                elif torch.cuda.is_available():
-                    self.device = "cuda"
-                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    self.device = "mps"  # Apple Silicon GPU
-                else:
-                    self.device = "cpu"
-            else:
-                self.device = device
-            
-            # Load model and tokenizer
-            from transformers import AutoModel, AutoTokenizer
-            
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
-            # Determine dtype based on device
-            if self.device == "cuda":
-                dtype = torch.float16
-            elif self.device == "mps":
-                dtype = torch.float16
-            else:
-                dtype = torch.float32
-            
-            self.model = AutoModel.from_pretrained(
-                model_name,
-                torch_dtype=dtype,
-                device_map=self.device
-            )
-            self.model.eval()
-
-    def _encode(self, texts: List[str]) -> np.ndarray:
-        """Encode texts using Qwen3-Embedding model.
-        
-        Args:
-            texts: List of text strings to encode
-            
-        Returns:
-            numpy array of embeddings (shape: [len(texts), embedding_dim])
-        """
-        # Qwen3-Embedding uses instruction-aware format
-        instruction = "Represent this sentence for searching relevant passages: "
-        formatted_texts = [f"{instruction}{text}" for text in texts]
-        
-        # Tokenize and encode
-        inputs = self.tokenizer(
-            formatted_texts,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512
-        ).to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Extract embeddings
-            if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-                embeddings = outputs.pooler_output
-            else:
-                # Mean pooling over sequence length
-                embeddings = outputs.last_hidden_state.mean(dim=1)
-        
-        # Convert to numpy and normalize
-        embeddings = embeddings.cpu().numpy()
-        # L2 normalize for cosine similarity
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings = embeddings / (norms + 1e-8)
-        
-        return embeddings
-
-    def get_guess(self, obs: Observation) -> GuesserAction:
-        """Make a guess by ranking unrevealed words by clue similarity."""
-        if obs.current_clue is None:
-            # No active clue (shouldn't happen during guesser turn)
-            return GuesserAction(word_index=None)
-        
-        # Find unrevealed words
-        unrevealed_indices = [
-            i for i, revealed in enumerate(obs.revealed_mask) if not revealed
-        ]
-        
-        if not unrevealed_indices:
-            return GuesserAction(word_index=None)
-        
-        unrevealed_words = [obs.board_words[i].lower() for i in unrevealed_indices]
-        
-        # Encode clue and words
-        clue_emb = self._encode([obs.current_clue.lower()])[0]
-        word_embs = self._encode(unrevealed_words)
-        
-        # Compute similarities
-        similarities = self._cosine_similarity(clue_emb, word_embs)
-        
-        # Get best match
-        best_idx = np.argmax(similarities)
-        best_sim = similarities[best_idx]
-        
-        # Decide: guess or pass
-        if best_sim >= self.confidence_threshold:
-            return GuesserAction(word_index=unrevealed_indices[best_idx])
-        else:
-            return GuesserAction(word_index=None)  # STOP
-
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
+            self.device = _resolve_device(device)
+            self._init_encoder(model_name)
 
 
 class LLMSpymaster(BaseSpymaster):
@@ -866,119 +544,21 @@ class LLMSpymaster(BaseSpymaster):
             ValueError: If quantization is requested but bitsandbytes is not available
         """
         if not HAS_TORCH:
-            raise ImportError(
-                "LLM agents require torch and transformers. "
-                "Install them with: pip install torch transformers"
-            )
-        
-        # Use config defaults if not provided
+            raise ImportError("LLM agents require torch and transformers.")
+
         self.model_name = model_name if model_name is not None else LLM_MODEL_NAME
         self.temperature = temperature if temperature is not None else LLM_TEMPERATURE
         self.max_new_tokens = max_new_tokens if max_new_tokens is not None else LLM_MAX_NEW_TOKENS
         quantization = quantization if quantization is not None else LLM_QUANTIZATION
         self.seed = seed
-        
-        # Auto-detect device
-        if device is None:
-            if DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-        
-        # Set seed for reproducibility
+        self.device = _resolve_device(device)
+
         if seed is not None:
             set_seed(seed)
-        
-        # Load model and tokenizer
+
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-        
-        # Setup quantization if requested
-        quantization_config = None
-        if quantization.lower() in ("4bit", "4-bit"):
-            if not HAS_BITSANDBYTES:
-                raise ValueError(
-                    "4-bit quantization requires bitsandbytes. "
-                    "Install with: pip install bitsandbytes"
-                )
-            if self.device != "cuda":
-                # bitsandbytes only supports CUDA, not MPS
-                if self.device == "mps":
-                    raise ValueError(
-                        "4-bit quantization with bitsandbytes is not supported on Apple Silicon (MPS).\n"
-                        "Alternatives for Apple Silicon:\n"
-                        "  1. Use float16 (default on MPS) - already memory efficient\n"
-                        "  2. Use a smaller model (e.g., Qwen2.5-3B-Instruct instead of 7B)\n"
-                        "  3. Use MLX framework with 4-bit quantization (requires different code path)\n"
-                        "  4. Use GGML/GGUF format with llama.cpp\n"
-                        "\n"
-                        "For now, set LLM_QUANTIZATION=none and use float16 (automatic on MPS)"
-                    )
-                else:
-                    raise ValueError(
-                        f"4-bit quantization only works on CUDA devices, not {self.device}"
-                    )
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
-        elif quantization.lower() in ("8bit", "8-bit"):
-            if not HAS_BITSANDBYTES:
-                raise ValueError(
-                    "8-bit quantization requires bitsandbytes. "
-                    "Install with: pip install bitsandbytes"
-                )
-            if self.device != "cuda":
-                if self.device == "mps":
-                    raise ValueError(
-                        "8-bit quantization with bitsandbytes is not supported on Apple Silicon (MPS).\n"
-                        "Alternatives for Apple Silicon:\n"
-                        "  1. Use float16 (default on MPS) - already memory efficient\n"
-                        "  2. Use a smaller model (e.g., Qwen2.5-3B-Instruct instead of 7B)\n"
-                        "\n"
-                        "For now, set LLM_QUANTIZATION=none and use float16 (automatic on MPS)"
-                    )
-                else:
-                    raise ValueError(
-                        f"8-bit quantization only works on CUDA devices, not {self.device}"
-                    )
-            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        
-        # Determine dtype based on device (only if not using quantization)
-        if quantization_config is None:
-            if self.device == "cuda":
-                dtype = torch.float16
-            elif self.device == "mps":
-                dtype = torch.float16  # Use FP16 to reduce memory usage (~14GB vs ~28GB in FP32)
-            else:
-                dtype = torch.float32
-        else:
-            dtype = None  # Quantization config handles dtype
-        
-        # Load model with appropriate configuration
-        model_kwargs = {
-            "device_map": self.device if quantization_config is None else "auto",
-            "trust_remote_code": True,  # Required for some newer models like Ministral
-        }
-        if quantization_config is not None:
-            model_kwargs["quantization_config"] = quantization_config
-        else:
-            model_kwargs["dtype"] = dtype
-        
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            **model_kwargs
-        )
-        self.model.eval()
-        
-        # Store last raw LLM output for debugging
+        quantization_config = _build_quantization_config(quantization, self.device)
+        self.model = _load_causal_lm(self.model_name, self.device, quantization_config)
         self.last_raw_output = None
 
     def get_clue(self, obs: Observation, max_retries: int = 3) -> SpymasterAction:
@@ -1263,125 +843,26 @@ class LLMGuesser(BaseGuesser):
             ValueError: If quantization is requested but bitsandbytes is not available
         """
         if not HAS_TORCH:
-            raise ImportError(
-                "LLM agents require torch and transformers. "
-                "Install them with: pip install torch transformers"
-            )
-        
-        # Use config defaults if not provided
+            raise ImportError("LLM agents require torch and transformers.")
+
         self.model_name = model_name if model_name is not None else LLM_MODEL_NAME
         self.temperature = temperature if temperature is not None else LLM_TEMPERATURE
         self.max_new_tokens = max_new_tokens if max_new_tokens is not None else LLM_MAX_NEW_TOKENS
         quantization = quantization if quantization is not None else LLM_QUANTIZATION
         self.seed = seed
-        
-        # Auto-detect device
-        if device is None:
-            if model is not None:
-                # Use device from shared model
-                self.device = getattr(model, "device", None) or "cpu"
-            elif DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-        
-        # Set seed for reproducibility
+        self.device = _resolve_device(device, model)
+
         if seed is not None:
             set_seed(seed)
-        
-        # Use provided model/tokenizer or load new ones
+
         if model is not None and tokenizer is not None:
             self.model = model
             self.tokenizer = tokenizer
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-            
-            # Setup quantization if requested
-            quantization_config = None
-            if quantization.lower() in ("4bit", "4-bit"):
-                if not HAS_BITSANDBYTES:
-                    raise ValueError(
-                        "4-bit quantization requires bitsandbytes. "
-                        "Install with: pip install bitsandbytes"
-                    )
-                if self.device != "cuda":
-                    if self.device == "mps":
-                        raise ValueError(
-                            "4-bit quantization with bitsandbytes is not supported on Apple Silicon (MPS).\n"
-                            "Alternatives for Apple Silicon:\n"
-                            "  1. Use float16 (default on MPS) - already memory efficient\n"
-                            "  2. Use a smaller model (e.g., Qwen2.5-3B-Instruct instead of 7B)\n"
-                            "  3. Use MLX framework with 4-bit quantization (requires different code path)\n"
-                            "  4. Use GGML/GGUF format with llama.cpp\n"
-                            "\n"
-                            "For now, set LLM_QUANTIZATION=none and use float16 (automatic on MPS)"
-                        )
-                    else:
-                        raise ValueError(
-                            f"4-bit quantization only works on CUDA devices, not {self.device}"
-                        )
-                quantization_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4"
-                )
-            elif quantization.lower() in ("8bit", "8-bit"):
-                if not HAS_BITSANDBYTES:
-                    raise ValueError(
-                        "8-bit quantization requires bitsandbytes. "
-                        "Install with: pip install bitsandbytes"
-                    )
-                if self.device != "cuda":
-                    if self.device == "mps":
-                        raise ValueError(
-                            "8-bit quantization with bitsandbytes is not supported on Apple Silicon (MPS).\n"
-                            "Alternatives for Apple Silicon:\n"
-                            "  1. Use float16 (default on MPS) - already memory efficient\n"
-                            "  2. Use a smaller model (e.g., Qwen2.5-3B-Instruct instead of 7B)\n"
-                            "\n"
-                            "For now, set LLM_QUANTIZATION=none and use float16 (automatic on MPS)"
-                        )
-                    else:
-                        raise ValueError(
-                            f"8-bit quantization only works on CUDA devices, not {self.device}"
-                        )
-                quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-            
-            # Determine dtype based on device (only if not using quantization)
-            if quantization_config is None:
-                if self.device == "cuda":
-                    dtype = torch.float16
-                elif self.device == "mps":
-                    dtype = torch.float16 
-                else:
-                    dtype = torch.float32
-            else:
-                dtype = None  # Quantization config handles dtype
-            
-            # Load model with appropriate configuration
-            model_kwargs = {
-                "device_map": self.device if quantization_config is None else "auto",
-                "trust_remote_code": True,  # Required for some newer models like Ministral
-            }
-            if quantization_config is not None:
-                model_kwargs["quantization_config"] = quantization_config
-            else:
-                model_kwargs["dtype"] = dtype
-            
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                **model_kwargs
-            )
-            self.model.eval()
-        
-        # Store last raw LLM output for debugging
+            quantization_config = _build_quantization_config(quantization, self.device)
+            self.model = _load_causal_lm(self.model_name, self.device, quantization_config)
+
         self.last_raw_output = None
 
     def get_guess(self, obs: Observation, max_retries: int = 3) -> GuesserAction:

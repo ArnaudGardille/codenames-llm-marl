@@ -6,14 +6,11 @@ import json
 from pathlib import Path
 
 from codenames_rl.agents import (
+    AGENT_KINDS,
     EmbeddingsGuesser,
-    EmbeddingsSpymaster,
     LLMGuesser,
-    LLMSpymaster,
     QwenEmbeddingGuesser,
-    QwenEmbeddingSpymaster,
-    RandomGuesser,
-    RandomSpymaster,
+    create_agent,
 )
 from codenames_rl.eval import EvaluationHarness
 from codenames_rl.utils.config import (
@@ -27,42 +24,35 @@ from codenames_rl.utils.config import (
     get_language_paths,
 )
 
+# Pairings used by --compare. Each entry is (spymaster_kind, guesser_kind).
+COMPARE_PAIRS = [
+    ("random", "random"),
+    ("random", "embeddings"),
+    ("embeddings", "random"),
+    ("embeddings", "embeddings"),
+    ("qwen_embedding", "qwen_embedding"),
+    ("qwen_embedding", "embeddings"),
+    ("embeddings", "qwen_embedding"),
+    ("llm", "llm"),
+    ("llm", "embeddings"),
+    ("embeddings", "llm"),
+    ("llm", "random"),
+    ("random", "llm"),
+]
 
-def create_agent(agent_type: str, vocabulary_path: str = None, seed: int = None):
-    """Create an agent based on type string.
-    
-    Args:
-        agent_type: One of "random", "embeddings", "qwen_embedding", "llm"
-        vocabulary_path: Path to vocabulary file (for spymasters)
-        seed: Random seed
-        
-    Returns:
-        Agent instance
-    """
-    if agent_type == "random_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for random spymaster")
-        return RandomSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "embeddings_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for embeddings spymaster")
-        return EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "qwen_embedding_spymaster":
-        if vocabulary_path is None:
-            raise ValueError("vocabulary_path required for qwen_embedding spymaster")
-        return QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=seed)
-    elif agent_type == "llm_spymaster":
-        return LLMSpymaster(seed=seed)
-    elif agent_type == "random_guesser":
-        return RandomGuesser(seed=seed)
-    elif agent_type == "embeddings_guesser":
-        return EmbeddingsGuesser(seed=seed)
-    elif agent_type == "qwen_embedding_guesser":
-        return QwenEmbeddingGuesser(seed=seed)
-    elif agent_type == "llm_guesser":
-        return LLMGuesser(seed=seed)
+
+def _build_pair(spy_kind: str, guesser_kind: str, vocabulary_path: str, seed: int):
+    """Build a (spymaster, guesser) pair, sharing the model when both are LLM/Qwen."""
+    spymaster = create_agent(f"{spy_kind}_spymaster", vocabulary_path=vocabulary_path, seed=seed)
+    if spy_kind == guesser_kind == "llm":
+        guesser = LLMGuesser(model=spymaster.model, tokenizer=spymaster.tokenizer,
+                             device=spymaster.device, seed=seed)
+    elif spy_kind == guesser_kind == "qwen_embedding":
+        guesser = QwenEmbeddingGuesser(model=spymaster.model, tokenizer=spymaster.tokenizer,
+                                       device=spymaster.device, seed=seed)
     else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
+        guesser = create_agent(f"{guesser_kind}_guesser", seed=seed)
+    return spymaster, guesser
 
 
 def main():
@@ -116,16 +106,16 @@ Examples:
     parser.add_argument(
         "--spymaster",
         type=str,
-        choices=["random", "embeddings", "qwen_embedding", "llm"],
+        choices=AGENT_KINDS,
         default="embeddings",
-        help="Spymaster agent type"
+        help="Spymaster agent type",
     )
     parser.add_argument(
         "--guesser",
         type=str,
-        choices=["random", "embeddings", "qwen_embedding", "llm"],
+        choices=AGENT_KINDS,
         default="embeddings",
-        help="Guesser agent type"
+        help="Guesser agent type",
     )
     parser.add_argument(
         "--num-games",
@@ -190,101 +180,20 @@ Examples:
         parser.error("--vocabulary or --lang required for non-random, non-llm spymaster")
     
     if args.compare:
-        # Compare all combinations
         print("Comparing baseline agent combinations...")
         print(f"Wordlist: {wordlist_path}")
         print(f"Vocabulary: {vocabulary_path}")
         print(f"Games per config: {args.num_games}")
         print(f"Starting seed: {args.start_seed}\n")
-        
+
         configs = {}
-        
-        # Random-Random
-        configs["Random/Random"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": RandomGuesser(seed=args.seed)
-        }
-        
-        # Random-Embeddings
-        configs["Random/Embeddings"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": EmbeddingsGuesser(seed=args.seed)
-        }
-        
-        # Embeddings-Random
-        configs["Embeddings/Random"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": RandomGuesser(seed=args.seed)
-        }
-        
-        # Embeddings-Embeddings
-        configs["Embeddings/Embeddings"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": EmbeddingsGuesser(seed=args.seed)
-        }
-        
-        # QwenEmbedding-QwenEmbedding (share model to save memory)
-        qwen_emb_spymaster = QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=args.seed)
-        configs["QwenEmbedding/QwenEmbedding"] = {
-            "spymaster": qwen_emb_spymaster,
-            "guesser": QwenEmbeddingGuesser(
-                model=qwen_emb_spymaster.model,
-                tokenizer=qwen_emb_spymaster.tokenizer,
-                device=qwen_emb_spymaster.device,
-                seed=args.seed
-            )
-        }
-        
-        # QwenEmbedding-Embeddings
-        configs["QwenEmbedding/Embeddings"] = {
-            "spymaster": QwenEmbeddingSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": EmbeddingsGuesser(seed=args.seed)
-        }
-        
-        # Embeddings-QwenEmbedding
-        configs["Embeddings/QwenEmbedding"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": QwenEmbeddingGuesser(seed=args.seed)
-        }
-        
-        # LLM-LLM (share model to save memory)
-        llm_spymaster = LLMSpymaster(seed=args.seed)
-        configs["LLM/LLM"] = {
-            "spymaster": llm_spymaster,
-            "guesser": LLMGuesser(
-                model=llm_spymaster.model,
-                tokenizer=llm_spymaster.tokenizer,
-                device=llm_spymaster.device,
-                seed=args.seed
-            )
-        }
-        
-        # LLM-Embeddings
-        configs["LLM/Embeddings"] = {
-            "spymaster": LLMSpymaster(seed=args.seed),
-            "guesser": EmbeddingsGuesser(seed=args.seed)
-        }
-        
-        # Embeddings-LLM
-        configs["Embeddings/LLM"] = {
-            "spymaster": EmbeddingsSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": LLMGuesser(seed=args.seed)
-        }
-        
-        # LLM-Random
-        configs["LLM/Random"] = {
-            "spymaster": LLMSpymaster(seed=args.seed),
-            "guesser": RandomGuesser(seed=args.seed)
-        }
-        
-        # Random-LLM
-        configs["Random/LLM"] = {
-            "spymaster": RandomSpymaster(vocabulary_path=vocabulary_path, seed=args.seed),
-            "guesser": LLMGuesser(seed=args.seed)
-        }
-        
+        for spy_kind, guesser_kind in COMPARE_PAIRS:
+            spymaster, guesser = _build_pair(spy_kind, guesser_kind, vocabulary_path, args.seed)
+            label = f"{spy_kind}/{guesser_kind}"
+            configs[label] = {"spymaster": spymaster, "guesser": guesser}
+
         from codenames_rl.eval import compare_agents
-        
+
         results = compare_agents(
             agent_configs=configs,
             wordlist_path=wordlist_path,
@@ -316,43 +225,17 @@ Examples:
             print(f"\nResults saved to: {args.output}")
     
     else:
-        # Single configuration
         print(f"Evaluating: {args.spymaster.title()} Spymaster + {args.guesser.title()} Guesser")
         print(f"Wordlist: {wordlist_path}")
         if vocabulary_path:
             print(f"Vocabulary: {vocabulary_path}")
         print(f"Games: {args.num_games}")
         print(f"Starting seed: {args.start_seed}\n")
-        
-        # Create agents
-        spymaster = create_agent(
-            f"{args.spymaster}_spymaster",
-            vocabulary_path=vocabulary_path,
-            seed=args.seed
+
+        spymaster, guesser = _build_pair(
+            args.spymaster, args.guesser, vocabulary_path, args.seed
         )
-        
-        # Share model if both agents are LLM or qwen_embedding to save memory
-        if args.spymaster == "llm" and args.guesser == "llm":
-            guesser = LLMGuesser(
-                model=spymaster.model,
-                tokenizer=spymaster.tokenizer,
-                device=spymaster.device,
-                seed=args.seed
-            )
-        elif args.spymaster == "qwen_embedding" and args.guesser == "qwen_embedding":
-            guesser = QwenEmbeddingGuesser(
-                model=spymaster.model,
-                tokenizer=spymaster.tokenizer,
-                device=spymaster.device,
-                seed=args.seed
-            )
-        else:
-            guesser = create_agent(
-                f"{args.guesser}_guesser",
-                seed=args.seed
-            )
-        
-        # Run evaluation
+
         harness = EvaluationHarness(
             wordlist_path=wordlist_path,
             spymaster=spymaster,
