@@ -80,7 +80,6 @@ if "/" in _embedding_model_raw:
     EMBEDDING_MODEL = _embedding_model_raw
 else:
     EMBEDDING_MODEL = f"sentence-transformers/{_embedding_model_raw}"
-LLM_MODEL_PATH = os.getenv("LLM_MODEL_PATH", "")
 
 # LLM Model Configuration
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
@@ -88,7 +87,32 @@ LLM_TEMPERATURE = _get("LLM_TEMPERATURE", 0.7, float)
 LLM_MAX_NEW_TOKENS = _get("LLM_MAX_NEW_TOKENS", 128, int)
 LLM_QUANTIZATION = os.getenv("LLM_QUANTIZATION", "none")
 
+# Spymaster scoring weights (cosine-similarity penalties)
+SPYMASTER_ALPHA_ASSASSIN = _get("SPYMASTER_ALPHA_ASSASSIN", 3.0, float)
+SPYMASTER_BETA_OPPONENT = _get("SPYMASTER_BETA_OPPONENT", 1.5, float)
+SPYMASTER_GAMMA_NEUTRAL = _get("SPYMASTER_GAMMA_NEUTRAL", 0.3, float)
+
 # Performance Settings
-DEVICE = os.getenv("DEVICE", "cpu")
+# Empty string => auto-detect (CUDA → MPS → CPU) inside agents.
+DEVICE = os.getenv("DEVICE", "").strip() or None
 EMBEDDING_BATCH_SIZE = _get("EMBEDDING_BATCH_SIZE", 32, int)
+
+
+def auto_detect_device(device: str | None = None) -> str:
+    """Resolve a torch device string, honouring DEVICE env override.
+
+    If ``device`` is provided it is returned as-is. Otherwise, if the DEVICE
+    env var is set we use it; if not, we walk CUDA → MPS → CPU.
+    """
+    import torch  # local import to keep config import cheap
+
+    if device:
+        return device
+    if DEVICE:
+        return DEVICE
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 

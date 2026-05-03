@@ -18,9 +18,13 @@ from ..utils.config import (
     LLM_TEMPERATURE,
     LLM_MAX_NEW_TOKENS,
     LLM_QUANTIZATION,
-    DEVICE,
     EMBEDDING_MODEL,
+    SPYMASTER_ALPHA_ASSASSIN,
+    SPYMASTER_BETA_OPPONENT,
+    SPYMASTER_GAMMA_NEUTRAL,
+    auto_detect_device,
 )
+from ._utils import cosine_similarity, stable_retry_seed
 
 # Conditional imports for LLM agents
 if TYPE_CHECKING:
@@ -46,6 +50,17 @@ try:
 except ImportError:
     HAS_TORCH = False
     HAS_BITSANDBYTES = False
+
+
+def _device_of(model) -> str:
+    """Best-effort lookup of the device a transformers/torch model lives on."""
+    model_device = getattr(model, "device", None)
+    if model_device is not None:
+        return str(model_device) if isinstance(model_device, torch.device) else str(model_device)
+    first_param = next(model.parameters(), None)
+    if first_param is not None:
+        return str(first_param.device)
+    return "cpu"
 
 
 def _load_tokenizer_with_fallback(model_name: str, trust_remote_code: bool = True):
@@ -175,19 +190,15 @@ class RandomSpymaster(BaseSpymaster):
 
     def get_clue(self, obs: Observation) -> SpymasterAction:
         """Generate a random valid clue."""
-        # Filter vocabulary to exclude board words
-        board_lower = [w.lower() for w in obs.board_words]
+        board_lower = {w.lower() for w in obs.board_words}
         candidates = [w for w in self.vocabulary if w not in board_lower]
-        
+
         if not candidates:
-            # Fallback: use a generic word not on board
-            candidates = ["thing", "stuff", "item", "object", "concept"]
-            candidates = [w for w in candidates if w not in board_lower]
-        
-        # Pick random clue
+            candidates = [w for w in ["thing", "stuff", "item", "object", "concept"]
+                          if w not in board_lower]
+
         clue = str(self.rng.choice(candidates))
         count = int(self.rng.integers(1, min(obs.team_remaining, 3) + 1))
-        
         return SpymasterAction(clue=clue, count=count)
 
 
@@ -233,15 +244,15 @@ class EmbeddingsSpymaster(BaseSpymaster):
         self,
         vocabulary_path: str,
         model_name: str = EMBEDDING_MODEL,
-        alpha: float = 3.0,  # Assassin penalty
-        beta: float = 1.5,   # Opponent penalty
-        gamma: float = 0.3,  # Neutral penalty
+        alpha: float = SPYMASTER_ALPHA_ASSASSIN,  # Assassin penalty
+        beta: float = SPYMASTER_BETA_OPPONENT,    # Opponent penalty
+        gamma: float = SPYMASTER_GAMMA_NEUTRAL,   # Neutral penalty
         similarity_threshold: float = 0.3,  # Min similarity to count toward clue number
         top_k: int = 100,    # Number of top candidates to consider
         seed: Optional[int] = None
     ):
         """Initialize embeddings-based spymaster.
-        
+
         Args:
             vocabulary_path: Path to vocabulary file
             model_name: SentenceTransformer model name
@@ -259,7 +270,7 @@ class EmbeddingsSpymaster(BaseSpymaster):
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k
         self.rng = np.random.default_rng(seed)
-        
+
         # Load model
         self.model = SentenceTransformer(model_name)
         self.vocabulary = self._load_vocabulary()
@@ -340,23 +351,23 @@ class EmbeddingsSpymaster(BaseSpymaster):
                 continue
             
             # Compute similarities
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
+            team_sims = cosine_similarity(cand_emb, team_embs)
             team_mean = np.mean(team_sims)
             
             # Penalties
             assassin_penalty = 0.0
             if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
+                assassin_sims = cosine_similarity(cand_emb, assassin_embs)
                 assassin_penalty = self.alpha * np.max(assassin_sims)
             
             opponent_penalty = 0.0
             if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
+                opponent_sims = cosine_similarity(cand_emb, opponent_embs)
                 opponent_penalty = self.beta * np.max(opponent_sims)
             
             neutral_penalty = 0.0
             if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
+                neutral_sims = cosine_similarity(cand_emb, neutral_embs)
                 neutral_penalty = self.gamma * np.mean(neutral_sims)
             
             # Final score
@@ -383,12 +394,6 @@ class EmbeddingsSpymaster(BaseSpymaster):
         
         return SpymasterAction(clue=best_clue, count=best_count)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class EmbeddingsGuesser(BaseGuesser):
@@ -434,7 +439,7 @@ class EmbeddingsGuesser(BaseGuesser):
         word_embs = self.model.encode(unrevealed_words, convert_to_numpy=True)
         
         # Compute similarities
-        similarities = self._cosine_similarity(clue_emb, word_embs)
+        similarities = cosine_similarity(clue_emb, word_embs)
         
         # Get best match
         best_idx = np.argmax(similarities)
@@ -446,12 +451,6 @@ class EmbeddingsGuesser(BaseGuesser):
         else:
             return GuesserAction(word_index=None)  # STOP
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class QwenEmbeddingSpymaster(BaseSpymaster):
@@ -510,40 +509,22 @@ class QwenEmbeddingSpymaster(BaseSpymaster):
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k
         self.rng = np.random.default_rng(seed)
-        
-        # Auto-detect device
-        if device is None:
-            if DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-        
-        # Load model and tokenizer
-        from transformers import AutoModel, AutoTokenizer
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        # Determine dtype based on device
-        if self.device == "cuda":
-            dtype = torch.float16
-        elif self.device == "mps":
-            dtype = torch.float16  # Use FP16 to reduce memory usage
-        else:
-            dtype = torch.float32
-        
+
+        self.device = auto_detect_device(device)
+
+        from transformers import AutoModel
+
+        self.tokenizer = _load_tokenizer_with_fallback(model_name)
+
+        dtype = torch.float16 if self.device in ("cuda", "mps") else torch.float32
+
         self.model = AutoModel.from_pretrained(
             model_name,
             torch_dtype=dtype,
             device_map=self.device
         )
         self.model.eval()
-        
+
         self.vocabulary = self._load_vocabulary()
 
     def _load_vocabulary(self) -> List[str]:
@@ -667,23 +648,23 @@ class QwenEmbeddingSpymaster(BaseSpymaster):
                 continue
             
             # Compute similarities
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
+            team_sims = cosine_similarity(cand_emb, team_embs)
             team_mean = np.mean(team_sims)
             
             # Penalties
             assassin_penalty = 0.0
             if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
+                assassin_sims = cosine_similarity(cand_emb, assassin_embs)
                 assassin_penalty = self.alpha * np.max(assassin_sims)
             
             opponent_penalty = 0.0
             if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
+                opponent_sims = cosine_similarity(cand_emb, opponent_embs)
                 opponent_penalty = self.beta * np.max(opponent_sims)
             
             neutral_penalty = 0.0
             if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
+                neutral_sims = cosine_similarity(cand_emb, neutral_embs)
                 neutral_penalty = self.gamma * np.mean(neutral_sims)
             
             # Final score
@@ -710,12 +691,6 @@ class QwenEmbeddingSpymaster(BaseSpymaster):
         
         return SpymasterAction(clue=best_clue, count=best_count)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class QwenEmbeddingGuesser(BaseGuesser):
@@ -756,56 +731,17 @@ class QwenEmbeddingGuesser(BaseGuesser):
         if model is not None and tokenizer is not None:
             self.model = model
             self.tokenizer = tokenizer
-            # Use device from parameter, or try to get from model, or default to cpu
-            if device is not None:
-                self.device = device
-            else:
-                # Try to get device from model
-                model_device = getattr(model, "device", None)
-                if model_device is not None:
-                    if isinstance(model_device, torch.device):
-                        self.device = str(model_device)
-                    else:
-                        self.device = model_device
-                else:
-                    # Try to get device from first parameter
-                    try:
-                        first_param = next(model.parameters(), None)
-                        if first_param is not None:
-                            self.device = str(first_param.device)
-                        else:
-                            self.device = "cpu"
-                    except:
-                        self.device = "cpu"
+            self.device = device or _device_of(model)
         else:
             self.model_name = model_name
-            
-            # Auto-detect device
-            if device is None:
-                if DEVICE != "cpu":
-                    self.device = DEVICE
-                elif torch.cuda.is_available():
-                    self.device = "cuda"
-                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    self.device = "mps"  # Apple Silicon GPU
-                else:
-                    self.device = "cpu"
-            else:
-                self.device = device
-            
-            # Load model and tokenizer
-            from transformers import AutoModel, AutoTokenizer
-            
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
-            # Determine dtype based on device
-            if self.device == "cuda":
-                dtype = torch.float16
-            elif self.device == "mps":
-                dtype = torch.float16
-            else:
-                dtype = torch.float32
-            
+            self.device = auto_detect_device(device)
+
+            from transformers import AutoModel
+
+            self.tokenizer = _load_tokenizer_with_fallback(model_name)
+
+            dtype = torch.float16 if self.device in ("cuda", "mps") else torch.float32
+
             self.model = AutoModel.from_pretrained(
                 model_name,
                 torch_dtype=dtype,
@@ -873,7 +809,7 @@ class QwenEmbeddingGuesser(BaseGuesser):
         word_embs = self._encode(unrevealed_words)
         
         # Compute similarities
-        similarities = self._cosine_similarity(clue_emb, word_embs)
+        similarities = cosine_similarity(clue_emb, word_embs)
         
         # Get best match
         best_idx = np.argmax(similarities)
@@ -885,12 +821,6 @@ class QwenEmbeddingGuesser(BaseGuesser):
         else:
             return GuesserAction(word_index=None)  # STOP
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class LLMSpymaster(BaseSpymaster):
@@ -935,24 +865,13 @@ class LLMSpymaster(BaseSpymaster):
         self.max_new_tokens = max_new_tokens if max_new_tokens is not None else LLM_MAX_NEW_TOKENS
         quantization = quantization if quantization is not None else LLM_QUANTIZATION
         self.seed = seed
-        
-        # Auto-detect device
-        if device is None:
-            if DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-        
+
+        self.device = auto_detect_device(device)
+
         # Set seed for reproducibility
         if seed is not None:
             set_seed(seed)
-        
+
         # Load model and tokenizer
         self.tokenizer = _load_tokenizer_with_fallback(self.model_name)
         
@@ -1177,17 +1096,12 @@ The count should match how many of the CURRENT TEAM_WORDS (not revealed ones) yo
                 board_token_ids = self._get_board_token_ids(obs.board_words)
                 
                 with torch.no_grad():
-                    # Add randomness to seed for each generation to ensure variation
-                    import random
-                    import time
-                    # Use combination of seed, attempt number, and time for variation
-                    generation_seed = (hash(str(self.seed) + str(attempt) + str(time.time())) % (2**31)) if self.seed is not None else None
+                    generation_seed = stable_retry_seed(self.seed, attempt)
                     if generation_seed is not None:
                         set_seed(generation_seed)
-                    
-                    # Slightly increase temperature on retries for more variation
+
                     current_temp = self.temperature * (1.0 + attempt * 0.1)
-                    
+
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=self.max_new_tokens,
@@ -1205,7 +1119,7 @@ The count should match how many of the CURRENT TEAM_WORDS (not revealed ones) yo
                 self.last_raw_output = generated
                 
                 # Parse JSON
-                clue, count = self._parse_spymaster_output(generated, obs.board_words)
+                clue, count = self._parse_spymaster_output(generated)
                 
                 # Validate
                 is_valid, error_msg = is_valid_clue(clue, obs.board_words)
@@ -1247,16 +1161,15 @@ The count should match how many of the CURRENT TEAM_WORDS (not revealed ones) yo
                         bad_token_ids.append(token_ids)
         return bad_token_ids if bad_token_ids else None
 
-    def _parse_spymaster_output(self, output: str, board_words: List[str]) -> tuple[str, int]:
+    def _parse_spymaster_output(self, output: str) -> tuple[str, int]:
         """Parse LLM output to extract clue and count.
-        
+
         Args:
             output: Raw LLM output
-            board_words: Board words for validation
-            
+
         Returns:
             Tuple of (clue, count)
-            
+
         Raises:
             ValueError: If parsing fails or output is invalid
         """
@@ -1333,21 +1246,12 @@ class LLMGuesser(BaseGuesser):
         quantization = quantization if quantization is not None else LLM_QUANTIZATION
         self.seed = seed
         
-        # Auto-detect device
-        if device is None:
-            if model is not None:
-                # Use device from shared model
-                self.device = getattr(model, "device", None) or "cpu"
-            elif DEVICE != "cpu":
-                self.device = DEVICE
-            elif torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"  # Apple Silicon GPU
-            else:
-                self.device = "cpu"
-        else:
+        if device is not None:
             self.device = device
+        elif model is not None:
+            self.device = _device_of(model)
+        else:
+            self.device = auto_detect_device(None)
         
         # Set seed for reproducibility
         if seed is not None:
@@ -1499,11 +1403,27 @@ class LLMGuesser(BaseGuesser):
                     "6. If you're not confident about a word matching the clue, STOP instead of guessing!\n\n"
                     "OUTPUT FORMAT:\n"
                     "Respond ONLY with valid JSON:\n"
-                    "- To guess a word: {\"guess\": \"<word_from_board>\"}\n"
+                    "- To guess a word: {\"guess\": \"<word_from_unrevealed>\"}\n"
                     "- To pass (stop): {\"guess\": \"STOP\"}\n\n"
                     "Think carefully - one wrong guess can lose the game!"
                 )
-                
+
+                # Few-shot exemplars to mirror the LLMSpymaster prompt contract.
+                example1_user = (
+                    "CLUE: pets\nCOUNT: 3\nREMAINING_GUESSES: 4\n\n"
+                    "UNREVEALED_WORDS: cat, dog, mouse, fire, sky, ocean\n"
+                    "REVEALED_WORDS: (none)\n\n"
+                    "Respond with JSON."
+                )
+                example1_assistant = '{"guess": "cat"}'
+                example2_user = (
+                    "CLUE: water\nCOUNT: 2\nREMAINING_GUESSES: 1\n\n"
+                    "UNREVEALED_WORDS: lamp, knife, desk\n"
+                    "REVEALED_WORDS: ocean, river\n\n"
+                    "None of the unrevealed words clearly matches water. Respond with JSON."
+                )
+                example2_assistant = '{"guess": "STOP"}'
+
                 user_message = f"""CLUE: {obs.current_clue}
 COUNT: {obs.current_count}
 REMAINING_GUESSES: {obs.remaining_guesses}
@@ -1516,50 +1436,54 @@ REVEALED_WORDS (DO NOT guess these - already revealed): {', '.join(revealed_list
 
 Which word should you guess? Only guess if you're confident it matches the clue. Otherwise, choose STOP.
 Respond with JSON: {{"guess": "<word_from_unrevealed_only>"}} or {{"guess": "STOP"}}"""
-                
+
                 messages = [
                     {"role": "system", "content": system_message},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": example1_user},
+                    {"role": "assistant", "content": example1_assistant},
+                    {"role": "user", "content": example2_user},
+                    {"role": "assistant", "content": example2_assistant},
+                    {"role": "user", "content": user_message},
                 ]
-                
+
                 # Generate
                 text = self.tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
                     add_generation_prompt=True
                 )
-                
+
                 # Check prompt length vs model context window
                 inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
                 input_length = inputs['input_ids'].shape[1]
-                model_max_length = getattr(self.tokenizer, 'model_max_length', 32768)  # Qwen2.5 default is 32K
-                
-                if input_length > model_max_length * 0.9:  # Warn if using >90% of context
+                model_max_length = getattr(self.tokenizer, 'model_max_length', 32768)
+
+                if input_length > model_max_length * 0.9:
                     print(f"⚠️  Warning: Prompt is {input_length}/{model_max_length} tokens ({input_length/model_max_length*100:.1f}% of context window)")
                 elif input_length > model_max_length:
                     raise ValueError(
                         f"Prompt too long: {input_length} tokens exceeds model max length {model_max_length}. "
                         f"Consider reducing few-shot examples or board word lists."
                     )
-                
+
+                # Suppress already-revealed words at the token level — same defence
+                # as LLMSpymaster's bad_words_ids over board words.
+                bad_token_ids = self._get_bad_words_token_ids(revealed_list)
+
                 with torch.no_grad():
-                    # Add randomness to seed for each generation to ensure variation
-                    import random
-                    import time
-                    # Use combination of seed, attempt number, and time for variation
-                    generation_seed = (hash(str(self.seed) + str(attempt) + str(time.time())) % (2**31)) if self.seed is not None else None
+                    generation_seed = stable_retry_seed(self.seed, attempt)
                     if generation_seed is not None:
                         set_seed(generation_seed)
-                    
-                    # Slightly increase temperature on retries for more variation
+
                     current_temp = self.temperature * (1.0 + attempt * 0.1)
-                    
+
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=self.max_new_tokens,
                         temperature=current_temp,
                         do_sample=True,
-                        pad_token_id=self.tokenizer.eos_token_id
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        bad_words_ids=bad_token_ids if bad_token_ids else None,
                     )
                 
                 # Decode output
@@ -1608,6 +1532,17 @@ Respond with JSON: {{"guess": "<word_from_unrevealed_only>"}} or {{"guess": "STO
         
         # All retries exhausted
         raise ValueError(f"LLM failed to generate valid guess after {max_retries} attempts. Last error: {last_error}")
+
+    def _get_bad_words_token_ids(self, words: List[str]) -> List[List[int]]:
+        """Token-id sequences (over casing/spacing variants) to block at decode."""
+        bad_token_ids: List[List[int]] = []
+        for word in words:
+            for variant in {word.lower(), word.upper(), word.title(), word}:
+                for text in (variant, f" {variant}"):
+                    token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+                    if token_ids:
+                        bad_token_ids.append(token_ids)
+        return bad_token_ids
 
     def _parse_guesser_output(self, output: str) -> str:
         """Parse LLM output to extract guess.
