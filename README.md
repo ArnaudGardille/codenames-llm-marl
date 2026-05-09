@@ -79,7 +79,7 @@ pip install -e ".[dev]"
 
 1) Run a game with a baseline:
 ```bash
-python -m codenames_rl.eval.harness --config configs/base.yaml --agent baseline_embeddings
+python scripts/run_eval.py --lang en --spymaster embeddings --guesser embeddings --num-games 1 --verbose
 ```
 
 2) Run with LLM baseline (requires GPU):
@@ -112,7 +112,7 @@ pytest -q -m "not slow"  # Skip LLM tests
 
 4) Evaluate on the frozen benchmark:
 ```bash
-python scripts/run_eval.py --config configs/base.yaml --split eval
+python scripts/run_eval.py --lang en --spymaster embeddings --guesser embeddings --num-games 100 --output results/embeddings.json
 ```
 
 5) Run the interactive Streamlit app:

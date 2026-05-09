@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
-from sentence_transformers import SentenceTransformer, CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from ..env.spaces import CardColor, GuesserAction, Observation, SpymasterAction
 from ..env.validation import is_valid_clue
-from ..utils.config import EMBEDDING_MODEL
+from ..utils.config import (
+    EMBEDDING_MODEL,
+    SPYMASTER_ALPHA_ASSASSIN,
+    SPYMASTER_BETA_OPPONENT,
+    SPYMASTER_GAMMA_NEUTRAL,
+)
+from ._utils import cosine_similarity
 from .baselines import BaseGuesser, BaseSpymaster
 
 
@@ -26,9 +31,9 @@ class ClusterSpymaster(BaseSpymaster):
         vocabulary_path: str,
         model_name: str = EMBEDDING_MODEL,
         cluster_threshold: float = 0.35,  # Min similarity within cluster
-        alpha: float = 3.0,
-        beta: float = 1.5,
-        gamma: float = 0.3,
+        alpha: float = SPYMASTER_ALPHA_ASSASSIN,
+        beta: float = SPYMASTER_BETA_OPPONENT,
+        gamma: float = SPYMASTER_GAMMA_NEUTRAL,
         top_k: int = 100,
         seed: Optional[int] = None
     ):
@@ -111,7 +116,7 @@ class ClusterSpymaster(BaseSpymaster):
                 continue
             
             # Compute similarities to all team words
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
+            team_sims = cosine_similarity(cand_emb, team_embs)
             
             # Find best cluster: words above threshold
             cluster_mask = team_sims >= self.cluster_threshold
@@ -129,17 +134,17 @@ class ClusterSpymaster(BaseSpymaster):
             # Penalties for danger
             assassin_penalty = 0.0
             if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
+                assassin_sims = cosine_similarity(cand_emb, assassin_embs)
                 assassin_penalty = self.alpha * np.max(assassin_sims)
             
             opponent_penalty = 0.0
             if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
+                opponent_sims = cosine_similarity(cand_emb, opponent_embs)
                 opponent_penalty = self.beta * np.max(opponent_sims)
             
             neutral_penalty = 0.0
             if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
+                neutral_sims = cosine_similarity(cand_emb, neutral_embs)
                 neutral_penalty = self.gamma * np.mean(neutral_sims)
             
             # Final score
@@ -164,12 +169,6 @@ class ClusterSpymaster(BaseSpymaster):
         
         return SpymasterAction(clue=best_clue, count=best_count)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class ContextualGuesser(BaseGuesser):
@@ -221,14 +220,14 @@ class ContextualGuesser(BaseGuesser):
         word_embs = self.model.encode(unrevealed_words, convert_to_numpy=True)
         
         # Compute similarities to current clue
-        current_sims = self._cosine_similarity(clue_emb, word_embs)
+        current_sims = cosine_similarity(clue_emb, word_embs)
         
         # Add history boost: words similar to previous clues are more likely team words
         history_boost = np.zeros_like(current_sims)
         if len(self.clue_history) > 1:
             for prev_clue in self.clue_history[:-1]:  # Exclude current clue
                 prev_emb = self.model.encode([prev_clue], convert_to_numpy=True)[0]
-                prev_sims = self._cosine_similarity(prev_emb, word_embs)
+                prev_sims = cosine_similarity(prev_emb, word_embs)
                 history_boost += prev_sims * self.history_weight
         
         # Combine current + history
@@ -238,7 +237,7 @@ class ContextualGuesser(BaseGuesser):
         for wrong_word, was_correct in self.guess_history:
             if not was_correct:
                 wrong_emb = self.model.encode([wrong_word], convert_to_numpy=True)[0]
-                wrong_sims = self._cosine_similarity(wrong_emb, word_embs)
+                wrong_sims = cosine_similarity(wrong_emb, word_embs)
                 # Penalize words similar to known wrong guesses
                 total_scores -= 0.2 * wrong_sims
         
@@ -254,12 +253,6 @@ class ContextualGuesser(BaseGuesser):
         else:
             return GuesserAction(word_index=None)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class AdaptiveGuesser(BaseGuesser):
@@ -311,7 +304,7 @@ class AdaptiveGuesser(BaseGuesser):
         clue_emb = self.model.encode([obs.current_clue.lower()], convert_to_numpy=True)[0]
         word_embs = self.model.encode(unrevealed_words, convert_to_numpy=True)
         
-        similarities = self._cosine_similarity(clue_emb, word_embs)
+        similarities = cosine_similarity(clue_emb, word_embs)
         
         best_idx = np.argmax(similarities)
         best_sim = similarities[best_idx]
@@ -321,12 +314,6 @@ class AdaptiveGuesser(BaseGuesser):
         else:
             return GuesserAction(word_index=None)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class CrossEncoderSpymaster(BaseSpymaster):
@@ -347,9 +334,9 @@ class CrossEncoderSpymaster(BaseSpymaster):
         vocabulary_path: str,
         bi_encoder_model: str = EMBEDDING_MODEL,
         cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        alpha: float = 3.0,  # Assassin penalty
-        beta: float = 1.5,   # Opponent penalty
-        gamma: float = 0.3,  # Neutral penalty
+        alpha: float = SPYMASTER_ALPHA_ASSASSIN,  # Assassin penalty
+        beta: float = SPYMASTER_BETA_OPPONENT,    # Opponent penalty
+        gamma: float = SPYMASTER_GAMMA_NEUTRAL,   # Neutral penalty
         similarity_threshold: float = 0.3,
         top_k_retrieve: int = 20,  # Top candidates from Bi-Encoder
         top_k_candidates: int = 100,  # Initial candidate pool
@@ -443,23 +430,23 @@ class CrossEncoderSpymaster(BaseSpymaster):
         # Score candidates with Bi-Encoder (fast)
         candidate_scores = []
         for cand_emb in candidate_embs:
-            team_sims = self._cosine_similarity(cand_emb, team_embs)
+            team_sims = cosine_similarity(cand_emb, team_embs)
             team_mean = np.mean(team_sims)
             
             # Penalties
             assassin_penalty = 0.0
             if assassin_embs is not None:
-                assassin_sims = self._cosine_similarity(cand_emb, assassin_embs)
+                assassin_sims = cosine_similarity(cand_emb, assassin_embs)
                 assassin_penalty = self.alpha * np.max(assassin_sims)
             
             opponent_penalty = 0.0
             if opponent_embs is not None:
-                opponent_sims = self._cosine_similarity(cand_emb, opponent_embs)
+                opponent_sims = cosine_similarity(cand_emb, opponent_embs)
                 opponent_penalty = self.beta * np.max(opponent_sims)
             
             neutral_penalty = 0.0
             if neutral_embs is not None:
-                neutral_sims = self._cosine_similarity(cand_emb, neutral_embs)
+                neutral_sims = cosine_similarity(cand_emb, neutral_embs)
                 neutral_penalty = self.gamma * np.mean(neutral_sims)
             
             score = team_mean - assassin_penalty - opponent_penalty - neutral_penalty
@@ -551,12 +538,6 @@ class CrossEncoderSpymaster(BaseSpymaster):
         
         return SpymasterAction(clue=best_clue, count=best_count)
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)
 
 
 class CrossEncoderGuesser(BaseGuesser):
@@ -615,7 +596,7 @@ class CrossEncoderGuesser(BaseGuesser):
         clue_emb = self.bi_encoder.encode([obs.current_clue.lower()], convert_to_numpy=True)[0]
         word_embs = self.bi_encoder.encode(unrevealed_words, convert_to_numpy=True)
         
-        similarities = self._cosine_similarity(clue_emb, word_embs)
+        similarities = cosine_similarity(clue_emb, word_embs)
         
         # Get top-k candidates for re-ranking
         top_k_indices = np.argsort(similarities)[-self.top_k_retrieve:][::-1]
@@ -641,9 +622,3 @@ class CrossEncoderGuesser(BaseGuesser):
         else:
             return GuesserAction(word_index=None)  # STOP
 
-    @staticmethod
-    def _cosine_similarity(vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Compute cosine similarity between a vector and matrix of vectors."""
-        vec_norm = vec / (np.linalg.norm(vec) + 1e-8)
-        matrix_norm = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8)
-        return np.dot(matrix_norm, vec_norm)

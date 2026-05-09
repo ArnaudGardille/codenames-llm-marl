@@ -138,11 +138,20 @@ celerybeat.pid
 .env
 .envrc
 .venv
-env/
+# Root-anchored so the project's own `src/codenames_rl/env/` package is NOT
+# ignored. Without the leading slash, gitignore matches any directory named
+# `env/` at any depth, which silently dropped the env package from VCS.
+/env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Project artefacts
+logs/
+results/
+wandb/
+outputs/
 
 # Spyder project settings
 .spyderproject

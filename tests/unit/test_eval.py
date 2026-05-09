@@ -57,53 +57,42 @@ class TestGameResult:
 class TestEvaluationMetrics:
     """Tests for EvaluationMetrics."""
 
-    def test_initialization(self):
-        """Test EvaluationMetrics can be created."""
-        metrics = EvaluationMetrics(
+    def _make(self):
+        return EvaluationMetrics(
             num_games=100,
             win_rate=0.75,
             avg_score=7.5,
             avg_turns=6.2,
+            avg_cards_per_turn=2.1,
+            std_cards_per_turn=0.4,
             illegal_clue_rate=0.02,
             assassin_rate=0.15,
             opponent_win_rate=0.10,
-            avg_guesses=14.3
+            truncation_rate=0.05,
+            avg_guesses=14.3,
         )
-        
+
+    def test_initialization(self):
+        """Test EvaluationMetrics can be created."""
+        metrics = self._make()
+
         assert metrics.num_games == 100
         assert metrics.win_rate == 0.75
+        assert metrics.avg_cards_per_turn == 2.1
+        assert metrics.std_cards_per_turn == 0.4
+        assert metrics.truncation_rate == 0.05
 
     def test_to_dict(self):
         """Test EvaluationMetrics can be serialized."""
-        metrics = EvaluationMetrics(
-            num_games=100,
-            win_rate=0.75,
-            avg_score=7.5,
-            avg_turns=6.2,
-            illegal_clue_rate=0.02,
-            assassin_rate=0.15,
-            opponent_win_rate=0.10,
-            avg_guesses=14.3
-        )
-        
-        d = metrics.to_dict()
+        d = self._make().to_dict()
         assert d["num_games"] == 100
         assert d["win_rate"] == 0.75
+        assert d["avg_cards_per_turn"] == 2.1
+        assert d["truncation_rate"] == 0.05
 
     def test_str_representation(self):
         """Test string representation is human-readable."""
-        metrics = EvaluationMetrics(
-            num_games=100,
-            win_rate=0.75,
-            avg_score=7.5,
-            avg_turns=6.2,
-            illegal_clue_rate=0.02,
-            assassin_rate=0.15,
-            opponent_win_rate=0.10,
-            avg_guesses=14.3
-        )
-        
-        s = str(metrics)
+        s = str(self._make())
         assert "100 games" in s
         assert "75.0%" in s or "75%" in s
 

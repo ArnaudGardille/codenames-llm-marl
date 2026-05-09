@@ -21,11 +21,12 @@ from codenames_rl.agents import (
     RandomSpymaster,
 )
 from codenames_rl.utils.config import (
+    AGENT_SEED,
     NUM_GAMES,
     START_SEED,
-    AGENT_SEED,
-    WORDLIST_PATH,
     VOCABULARY_PATH,
+    WORDLIST_PATH,
+    get_language_paths,
 )
 
 
@@ -248,15 +249,22 @@ Examples:
     )
     
     parser.add_argument(
+        "--lang",
+        type=str,
+        choices=["en", "fr"],
+        default=None,
+        help="Language preset (en|fr). If set, overrides --wordlist/--vocabulary defaults."
+    )
+    parser.add_argument(
         "--wordlist",
         type=str,
-        default=WORDLIST_PATH,
+        default=None,
         help=f"Path to wordlist file for board generation (default: {WORDLIST_PATH})"
     )
     parser.add_argument(
         "--vocabulary",
         type=str,
-        default=VOCABULARY_PATH,
+        default=None,
         help=f"Path to vocabulary file for clue generation (default: {VOCABULARY_PATH})"
     )
     
@@ -322,7 +330,19 @@ Examples:
     )
     
     args = parser.parse_args()
-    
+
+    # Resolve language preset → wordlist/vocabulary if --lang is given.
+    if args.lang is not None:
+        lang_wordlist, lang_vocabulary = get_language_paths(args.lang)
+        if args.wordlist is None:
+            args.wordlist = lang_wordlist
+        if args.vocabulary is None:
+            args.vocabulary = lang_vocabulary
+    if args.wordlist is None:
+        args.wordlist = WORDLIST_PATH
+    if args.vocabulary is None:
+        args.vocabulary = VOCABULARY_PATH
+
     # Print configuration
     print("="*70)
     print("ADVERSARIAL MODE EVALUATION")
@@ -409,8 +429,11 @@ Examples:
         print(f"Total Games:       {metrics['num_games']}")
         print(f"\nRed Team Wins:     {metrics['red_wins']} ({metrics['red_win_rate']:.1%})")
         print(f"Blue Team Wins:    {metrics['blue_wins']} ({metrics['blue_win_rate']:.1%})")
-        print(f"\nAvg Red Score:     {metrics['avg_red_score']:.2f}/9")
-        print(f"Avg Blue Score:    {metrics['avg_blue_score']:.2f}/8")
+        # Score denominators come from the env (red starts with 9, blue with 8
+        # in the standard Codenames distribution); we display raw scores so the
+        # values stay correct even if the env later swaps team sizes.
+        print(f"\nAvg Red Score:     {metrics['avg_red_score']:.2f}")
+        print(f"Avg Blue Score:    {metrics['avg_blue_score']:.2f}")
         print(f"\nAvg Game Length:   {metrics['avg_turns']:.1f} turns")
         print("="*70)
         
