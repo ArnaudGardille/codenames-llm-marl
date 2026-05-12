@@ -94,6 +94,6 @@ def sample_observation():
 
 @pytest.fixture
 def wordlist_path():
-    """Path to test wordlist."""
-    return str(Path(__file__).parent.parent / "configs" / "wordlist.txt")
+    """Path to the English test wordlist."""
+    return str(Path(__file__).parent.parent / "configs" / "wordlist_en.txt")
 

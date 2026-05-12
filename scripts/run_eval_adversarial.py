@@ -90,66 +90,62 @@ def run_adversarial_game(
     Returns:
         Dictionary with game results
     """
-    try:
-        from codenames_rl.env.adversarial_pz import env as make_env
-    except ImportError:
-        raise NotImplementedError(
-            "Adversarial environment not yet implemented. "
-            "Please implement CodenamesAdversarialPZ first."
-        )
-    
+    from codenames_rl.env.adversarial_pz import env as make_env
+
     env = make_env(wordlist_path=wordlist_path)
     env.reset(seed=seed)
-    
+
+    # The PettingZoo env names agents team_a_*/team_b_*; map them onto the
+    # CLI's red/blue convention (red = team_a, blue = team_b).
     agents = {
-        'red_spymaster': red_spymaster,
-        'red_guesser': red_guesser,
-        'blue_spymaster': blue_spymaster,
-        'blue_guesser': blue_guesser,
+        'team_a_spymaster': red_spymaster,
+        'team_a_guesser': red_guesser,
+        'team_b_spymaster': blue_spymaster,
+        'team_b_guesser': blue_guesser,
     }
-    
+
     game_log = []
     turns = 0
-    
+
     for agent_id in env.agent_iter():
         obs, reward, terminated, truncated, info = env.last()
-        
         if terminated or truncated:
             break
-        
+
         agent = agents[agent_id]
-        
-        # Get action based on agent role
         if 'spymaster' in agent_id:
             action = agent.get_clue(obs)
         else:
             action = agent.get_guess(obs)
-        
+
         if verbose:
             print(f"[Turn {turns}] {agent_id}: {action}")
-        
+
         game_log.append({
             'turn': turns,
             'agent': agent_id,
             'action': str(action),
-            'reward': reward
+            'reward': reward,
         })
-        
+
         env.step(action)
         turns += 1
-    
-    # Get final results
-    winner = info.get('winner', None)  # 'red' or 'blue'
-    red_score = info.get('red_score', 0)
-    blue_score = info.get('blue_score', 0)
-    
+
+    # Winner and scores come straight from the core: red=team_a, blue=team_b,
+    # score = starting count − remaining.
+    core = env.core
+    winner_team = core.winner if core is not None else None
+    winner = {'team_a': 'red', 'team_b': 'blue'}.get(winner_team)
+    red_score = 9 - (core.team_a_remaining if core is not None else 9)
+    blue_score = 8 - (core.team_b_remaining if core is not None else 8)
+
     return {
         'seed': seed,
         'winner': winner,
         'red_score': red_score,
         'blue_score': blue_score,
         'turns': turns,
-        'game_log': game_log if verbose else None
+        'game_log': game_log if verbose else None,
     }
 
 
